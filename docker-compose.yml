@@ -1,75 +1,22 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: swaga_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-swaga}
-      POSTGRES_USER: ${POSTGRES_USER:-swaga_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-swaga_password}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-swaga_user}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  bot:
+  vpn-bot:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: swaga_bot
+    container_name: swaga_vpn_bot
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      # Database
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-swaga_user}:${POSTGRES_PASSWORD:-swaga_password}@postgres:5432/${POSTGRES_DB:-swaga}
-
-      # Bot
-      BOT_TOKEN: ${BOT_TOKEN}
-      ADMIN_CHAT_ID: ${ADMIN_CHAT_ID}
-      SUPPORT_BOT_USERNAME: ${SUPPORT_BOT_USERNAME:-SWAGASupport_bot}
-
-      # 3X-UI Panel
-      XUI_BASE: ${XUI_BASE}
-      XUI_USERNAME: ${XUI_USERNAME}
-      XUI_PASSWORD: ${XUI_PASSWORD}
-      XUI_INBOUND_ID: ${XUI_INBOUND_ID:-1}
-
-      # VPN Config
-      VPN_FLOW: ${VPN_FLOW:-xtls-rprx-vision}
-
-      # YooKassa
-      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID}
-      YOOKASSA_SECRET: ${YOOKASSA_SECRET}
-      YOOKASSA_WEBHOOK_SECRET: ${YOOKASSA_WEBHOOK_SECRET}
-
-      # Pricing (RUB)
-      PRICE_M1: ${PRICE_M1:-130}
-      PRICE_M3: ${PRICE_M3:-350}
-      PRICE_M12: ${PRICE_M12:-800}
-
-      # Webhook Server
-      WEBHOOK_HOST: ${WEBHOOK_HOST:-0.0.0.0}
-      WEBHOOK_PORT: ${WEBHOOK_PORT:-8000}
-      WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL}
-
-      # Other
-      TRIAL_DAYS: ${TRIAL_DAYS:-7}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    ports:
-      - "${WEBHOOK_PORT:-8000}:8000"
+    env_file:
+      - .env
     volumes:
-      - ./logs:/app/logs
-      - ./src:/app/src
-    command: python -m src.main
+      - bot_data:/app/backups
+      - ./vpn_bot.db:/app/vpn_bot.db
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
-  postgres_data:
+  bot_data:

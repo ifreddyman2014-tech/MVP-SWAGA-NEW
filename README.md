@@ -1,319 +1,218 @@
-# SWAGA VPN Bot - Production-Ready MVP
+# SWAGA VPN Bot
 
-A professional, scalable Telegram VPN bot refactored from legacy monolithic architecture.
+Telegram-бот для автоматической продажи и управления VPN-доступом через панель [3X-UI](https://github.com/MHSanaei/3x-ui) (Xray / VLESS).
 
-## 🏗️ Architecture
+## Возможности
 
-### Tech Stack
-- **Language**: Python 3.11+
-- **Bot Framework**: aiogram 3.x (Routers, Dependency Injection)
-- **Database**: PostgreSQL + SQLAlchemy 2.0 (Async)
-- **VPN Panel**: 3X-UI (MHSanaei fork)
-- **Protocol**: VLESS-Reality + xtls-rprx-vision
-- **Payments**: YooKassa (Webhook-based)
-- **Deployment**: Docker Compose
+- **Тарифные планы** — пробный (7 дней, бесплатно), 1 мес. (130 ₽), 3 мес. (350 ₽), 1 год (800 ₽)
+- **Автоматическое создание VPN-клиентов** через 3X-UI API
+- **Быстрое подключение** — deep link `v2raytun://` для мобильных приложений
+- **Личный кабинет** — статус подписки, VLESS-конфиг, кнопка быстрого подключения
+- **Пробный период** — одноразовый trial с контролем через БД
+- **Оплата** — заглушка YooKassa (готова к интеграции с реальным API)
+- **Автоматика** — ежедневная проверка подписок, напоминания за 3 дня, удаление истёкших клиентов
+- **Бэкапы** — ежедневное копирование БД в 03:00 UTC, ротация 30 дней
+- **Админ-команды** — `/reset_me` для сброса trial и удаления VPN-конфига
 
-### Database Schema (Federated Identity)
-
-**Key Design**: User has ONE static UUID synced across all servers.
-
-```
-User (telegram_id, username, balance, user_uuid)
-  ↓
-Subscription (user_id, expiry_date, is_active, plan_type)
-  ↓
-Key (subscription_id, server_id, key_uuid) [ONE per server per subscription]
-  ↓
-Server (api_url, credentials, host, port, public_key, short_ids, domain)
-```
-
-## 📁 Project Structure
+## Архитектура
 
 ```
-MVP-SWAGA-NEW/
-├── docker-compose.yml          # PostgreSQL + Bot services
-├── Dockerfile                  # Bot container
-├── requirements.txt            # Python dependencies
-├── .env.example                # Environment template
-├── migrate_legacy.py           # SQLite → PostgreSQL migration
-├── logs/                       # Application logs
-└── src/
-    ├── config.py               # Pydantic settings
-    ├── main.py                 # Entry point (Bot + FastAPI webhook)
-    ├── database/
-    │   ├── models.py           # SQLAlchemy models
-    │   ├── session.py          # DB connection management
-    │   └── migrations.py       # Schema initialization
-    ├── services/
-    │   ├── xui.py              # 3X-UI API client
-    │   └── payment.py          # YooKassa service
-    └── bot/
-        ├── keyboards.py        # Inline keyboards
-        └── handlers/
-            └── user.py         # User command handlers
+.
+├── bot.py              # Точка входа: хендлеры, коллбэки, scheduler
+├── config.py           # Загрузка переменных окружения и констант
+├── database.py         # Async SQLite (aiosqlite) — users, subscriptions, transactions
+├── xui_api.py          # HTTP-клиент для 3X-UI Panel API
+├── payment.py          # Заглушка платёжной системы YooKassa
+├── backup.py           # Бэкап / восстановление БД
+├── keyboards.py        # Reply- и Inline-клавиатуры
+├── utils.py            # UUID, форматирование дат, сборка VLESS-ссылки
+├── requirements.txt    # Python-зависимости
+├── .env.example        # Шаблон переменных окружения
+├── Dockerfile          # Образ контейнера
+├── docker-compose.yml  # Оркестрация сервисов
+└── vpn-bot.service     # Unit-файл systemd
 ```
 
-## 🚀 Quick Start
+## Стек
 
-### 1. Prerequisites
-- Docker & Docker Compose
-- 3X-UI panel (MHSanaei fork) running
-- YooKassa account configured
+| Компонент      | Технология                |
+|----------------|---------------------------|
+| Бот-фреймворк  | aiogram 2.25 (polling)    |
+| База данных    | SQLite (aiosqlite)        |
+| VPN-панель     | 3X-UI (MHSanaei fork)     |
+| Протокол       | VLESS + TLS               |
+| HTTP-клиент    | requests                  |
+| Оплата         | YooKassa (stub)           |
+| Python         | 3.11+                     |
 
-### 2. Configuration
+## Быстрый старт
 
-Copy `.env.example` to `.env` and configure:
+### 1. Клонирование
+
+```bash
+git clone https://github.com/ifreddyman2014-tech/SWAGA-NEW.git
+cd SWAGA-NEW
+```
+
+### 2. Настройка окружения
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-**Critical settings**:
-```env
-# Database
-DATABASE_URL=postgresql+asyncpg://swaga_user:SECURE_PASSWORD@postgres:5432/swaga
+Заполните `.env` реальными значениями:
 
-# Bot
-BOT_TOKEN=your_bot_token_here
-ADMIN_CHAT_ID=your_telegram_id
+| Переменная     | Описание                                     |
+|----------------|----------------------------------------------|
+| `BOT_TOKEN`    | Токен Telegram-бота от @BotFather            |
+| `ADMIN_IDS`    | Telegram ID администраторов (через запятую)   |
+| `XUI_HOST`     | Адрес панели 3X-UI                           |
+| `XUI_PORT`     | Порт панели (по умолчанию `443`)             |
+| `XUI_WEB_PATH` | Веб-путь панели (если настроен)              |
+| `XUI_USER`     | Логин панели 3X-UI                           |
+| `XUI_PASS`     | Пароль панели 3X-UI                          |
+| `INBOUND_ID`   | ID inbound в 3X-UI                           |
+| `YOOKASSA_ID`  | ID магазина YooKassa                         |
+| `YOOKASSA_KEY` | Секретный ключ YooKassa                      |
+| `DB_PATH`      | Путь к файлу БД (по умолчанию `vpn_bot.db`) |
+| `BACKUP_DIR`   | Директория бэкапов (по умолчанию `backups`)  |
 
-# 3X-UI Panel
-XUI_BASE=https://your-panel.example.com
-XUI_USERNAME=admin
-XUI_PASSWORD=secure_password
-XUI_INBOUND_ID=1
-
-# YooKassa
-YOOKASSA_SHOP_ID=123456
-YOOKASSA_SECRET=live_xxxxxxxxxxxxx
-WEBHOOK_BASE_URL=https://your-webhook-domain.com
-```
-
-### 3. Deploy
+### 3. Запуск — локально
 
 ```bash
-# Start services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f bot
-
-# Check health
-curl http://localhost:8000/health
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python bot.py
 ```
 
-### 4. Configure YooKassa Webhook
-
-In YooKassa dashboard, set webhook URL:
-```
-https://your-webhook-domain.com/webhook/yookassa
-```
-
-### 5. Add Server Configuration
-
-After deployment, add actual server details to the `servers` table in PostgreSQL:
-
-```sql
-INSERT INTO servers (
-    name, is_active, api_url, username, password, inbound_id,
-    host, port, public_key, short_ids, domain,
-    security, network_type, flow, fingerprint, spider_x
-) VALUES (
-    'Main Server', true,
-    'https://panel.example.com', 'admin', 'password', 1,
-    'vpn.example.com', 443, 'YOUR_PUBLIC_KEY', 'SHORT_ID_1,SHORT_ID_2', 'example.com',
-    'reality', 'xhttp', 'xtls-rprx-vision', 'chrome', '/'
-);
-```
-
-## 📦 Migration from Legacy
-
-To migrate from the old SQLite-based bot:
+### 4. Запуск — Docker
 
 ```bash
-# Run migration script
-python migrate_legacy.py --sqlite-path /path/to/old/bot.db --server-name "Main Server"
+docker compose up -d
 
-# Follow post-migration steps from script output
+# Логи
+docker compose logs -f vpn-bot
 ```
 
-**Migration handles**:
-- ✅ Users (telegram_id, username, trial_used)
-- ✅ Active subscriptions (with expiry dates)
-- ✅ Payment history
-- ✅ Creates keys for existing subscriptions
-- ⚠️ Server config needs manual update after migration
+### 5. Запуск — systemd
 
-## 🔑 3X-UI Integration
+```bash
+sudo cp vpn-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now vpn-bot
 
-### Critical: JSON Serialization
+# Статус
+sudo systemctl status vpn-bot
 
-The MHSanaei 3X-UI fork requires `settings` field as a **JSON string**:
+# Логи
+sudo journalctl -u vpn-bot -f
+```
+
+## Команды бота
+
+| Команда / Кнопка              | Действие                                      |
+|-------------------------------|-----------------------------------------------|
+| `/start`                      | Регистрация + главное меню                    |
+| `Получить доступ`             | Выбор тарифного плана                         |
+| `Инструкция`                  | Как подключиться (V2RayTun, v2rayN)           |
+| `Личный кабинет`              | Статус подписки, VLESS-конфиг, Quick Connect  |
+| `/reset_me` _(только админ)_  | Сброс trial + удаление VPN-конфига            |
+
+## Формат VLESS-ссылки
+
+```
+vless://{uuid}@{host}:{port}?type=tcp&security=tls&sni={host}&host={host}&path={path}#VPN-SWAGA
+```
+
+Значения по умолчанию: `host=yandex.ru`, `port=443`, `path=/adv`.
+
+## Фоновые задачи (Scheduler)
+
+| Время (UTC) | Задача                                                             |
+|-------------|--------------------------------------------------------------------|
+| 00:00       | Проверка подписок: напоминания (за 3 дня), деактивация истёкших    |
+| 03:00       | Бэкап БД в `backups/backup_YYYYMMDD_HHMMSS.db`                    |
+
+## Бэкапы
+
+- **Автоматические** — каждый день в 03:00 UTC
+- **Ротация** — хранятся последние 30 дней, старые удаляются
+- **Восстановление:**
 
 ```python
-# ✅ CORRECT
-payload = {
-    "id": 1,
-    "settings": '{"clients": [{"uuid": "...", ...}]}'  # String!
-}
-
-# ❌ WRONG
-payload = {
-    "id": 1,
-    "settings": {"clients": [...]}  # Object will fail!
-}
+from backup import restore_backup
+restore_backup("20260131_030000")  # формат: YYYYMMDD_HHMMSS
 ```
 
-Our `ThreeXUIClient` handles this automatically.
+## База данных
 
-### Flow Configuration
-
-All clients use `xtls-rprx-vision` flow by default (configurable via `VPN_FLOW` env var).
-
-## 💳 Payment Flow
-
-1. User clicks payment button → `YooKassaService.create_payment()`
-2. Payment record saved with status `pending`
-3. User completes payment on YooKassa
-4. YooKassa sends webhook → `/webhook/yookassa`
-5. `YooKassaService.process_successful_payment()`:
-   - Creates/extends subscription
-   - Syncs keys to all active servers
-   - Updates payment status to `succeeded`
-6. User receives keys automatically via bot message
-
-## 🔄 Background Tasks
-
-### Subscription Reminders (15-minute interval)
-
-- **24h before expiry**: "Subscription expiring tomorrow"
-- **Day of expiry**: "Subscription expiring today"
-- **After expiry**: Deactivate subscription, notify user
-
-## 🔗 Deep Linking
-
-Generated VLESS links include v2raytun:// deep link for one-click setup:
+SQLite с тремя таблицами:
 
 ```
-v2raytun://install-config?url=vless%3A%2F%2F...&name=SWAGA
+users
+├── user_id        (PK, Telegram ID)
+├── username
+├── reg_date
+├── trial_used     (0/1)
+└── current_server (default 1)
+
+subscriptions
+├── sub_id         (PK, autoincrement)
+├── user_id        (FK → users)
+├── plan           (trial / 1m / 3m / 1y)
+├── start_date
+├── end_date
+├── is_active      (0/1)
+└── vless_uuid
+
+transactions
+├── id             (PK, autoincrement)
+├── user_id        (FK → users)
+├── amount
+├── status
+└── timestamp
 ```
 
-Users can tap to auto-import config into V2RayTun app.
+## Настройка 3X-UI
 
-## 📊 Scaling Notes
+1. Установите [3X-UI](https://github.com/MHSanaei/3x-ui) на сервер
+2. Создайте inbound с протоколом **VLESS + TLS**
+3. Запишите `INBOUND_ID` (виден в URL панели при редактировании inbound)
+4. Укажите данные панели в `.env`
 
-### Current: 1 VPS
-- PostgreSQL + Bot in Docker Compose
-- Single 3X-UI server
+Бот автоматически создаёт и удаляет клиентов через API панели.
 
-### Scale to 10+ Servers
-1. Add servers to `servers` table
-2. Payment webhook automatically creates keys on ALL active servers
-3. Users get multi-server configs (automatic failover in V2RayTun)
+## Интеграция YooKassa
 
-### Scale to 50k Users
-1. Use managed PostgreSQL (connection pooling)
-2. Deploy bot on multiple instances (polling can run on multiple workers)
-3. Redis for distributed locks (if needed)
-4. Load balancer for webhook endpoint
+Сейчас используется заглушка (`payment.py`). Для подключения реальных платежей:
 
-## 🛠️ Development
+1. Зарегистрируйтесь в [YooKassa](https://yookassa.ru/)
+2. Получите `SHOP_ID` и `SECRET_KEY`
+3. Реализуйте создание платежа и обработку webhook в `payment.py`
+4. Укажите `YOOKASSA_ID` и `YOOKASSA_KEY` в `.env`
 
-### Local Setup
+## Устранение неполадок
 
+**Бот не отвечает:**
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+# Docker
+docker compose logs -f vpn-bot
 
-# Run database migrations
-python -m src.database.migrations
-
-# Run bot
-python -m src.main
+# systemd
+sudo journalctl -u vpn-bot -f
 ```
 
-### Testing
+**3X-UI не подключается:**
+- Проверьте `XUI_HOST` и `XUI_PORT`
+- Убедитесь, что панель доступна: `curl -k https://{XUI_HOST}:{XUI_PORT}/login`
+- Проверьте логин/пароль
 
-```bash
-# Test 3X-UI connection
-from src.services.xui import ThreeXUIClient
+**Подписка не создаётся:**
+- Проверьте `INBOUND_ID` — он должен совпадать с ID в панели
+- Убедитесь, что inbound активен и поддерживает VLESS
 
-async def test():
-    client = ThreeXUIClient(
-        base_url="https://panel.example.com",
-        username="admin",
-        password="password",
-    )
-    async with client.session():
-        clients = await client.list_clients()
-        print(f"Found {len(clients)} clients")
+## Лицензия
 
-asyncio.run(test())
-```
-
-## 🔒 Security
-
-- ✅ Environment variables for secrets
-- ✅ PostgreSQL with secure passwords
-- ✅ HTTPS required for webhook
-- ✅ Webhook signature validation (if configured)
-- ✅ No secrets in code
-- ✅ SQL injection protection (SQLAlchemy ORM)
-
-## 📝 Environment Variables Reference
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DATABASE_URL` | ✅ | - | PostgreSQL connection URL |
-| `BOT_TOKEN` | ✅ | - | Telegram Bot API token |
-| `XUI_BASE` | ✅ | - | 3X-UI panel URL |
-| `XUI_USERNAME` | ✅ | - | Panel admin username |
-| `XUI_PASSWORD` | ✅ | - | Panel admin password |
-| `YOOKASSA_SHOP_ID` | ✅ | - | YooKassa shop ID |
-| `YOOKASSA_SECRET` | ✅ | - | YooKassa secret key |
-| `WEBHOOK_BASE_URL` | ✅ | - | Public webhook URL |
-| `ADMIN_CHAT_ID` | ❌ | - | Admin Telegram ID |
-| `VPN_FLOW` | ❌ | `xtls-rprx-vision` | VLESS flow control |
-| `TRIAL_DAYS` | ❌ | `7` | Trial period duration |
-| `PRICE_M1` | ❌ | `130` | 1-month price (RUB) |
-| `PRICE_M3` | ❌ | `350` | 3-month price (RUB) |
-| `PRICE_M12` | ❌ | `800` | 12-month price (RUB) |
-
-## 🐛 Troubleshooting
-
-### Bot not responding
-```bash
-docker-compose logs -f bot
-# Check for authentication errors or network issues
-```
-
-### 3X-UI connection fails
-- Verify `XUI_BASE` includes `https://`
-- Check credentials
-- Test panel accessibility: `curl -k $XUI_BASE/login`
-
-### Payments not processing
-- Verify webhook URL is publicly accessible
-- Check YooKassa webhook logs
-- Check bot logs: `docker-compose logs -f bot | grep -i webhook`
-
-### Database connection errors
-- Ensure PostgreSQL is running: `docker-compose ps`
-- Check `DATABASE_URL` format
-- Verify network connectivity
-
-## 📄 License
-
-Proprietary - SWAGA VPN
-
-## 🤝 Support
-
-For issues and questions:
-- Check logs: `docker-compose logs -f bot`
-- Review configuration: `.env` file
-- Contact: @SWAGASupport_bot (Telegram)
-
----
-
-**Built with** ❤️ **for scalability and production readiness**
+MIT

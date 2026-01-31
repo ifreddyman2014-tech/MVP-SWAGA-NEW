@@ -1,0 +1,18 @@
+[Unit]
+Description=SWAGA VPN Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=vpnbot
+Group=vpnbot
+WorkingDirectory=/opt/vpn-bot
+EnvironmentFile=/opt/vpn-bot/.env
+ExecStart=/opt/vpn-bot/venv/bin/python bot.py
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
