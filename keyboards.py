@@ -9,7 +9,7 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from config import PLANS
+from config import PLANS, SUPPORT_URL
 
 
 # ── Reply-клавиатуры ──────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ def instruction_kb() -> InlineKeyboardMarkup:
     kb.add(
         InlineKeyboardButton(
             text="💬 Техподдержка",
-            url="https://t.me/your_support_bot",
+            url=SUPPORT_URL,
         )
     )
     return kb
