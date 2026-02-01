@@ -15,11 +15,12 @@ from config import PLANS, SUPPORT_URL
 # ── Reply-клавиатуры ──────────────────────────────────────────────────────────
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
-    """Главное меню бота — три кнопки, каждая на отдельной строке."""
+    """Главное меню бота — четыре кнопки, каждая на отдельной строке."""
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("Тарифы"))
+    kb.add(KeyboardButton("Получить доступ"))
     kb.add(KeyboardButton("Инструкция"))
     kb.add(KeyboardButton("Личный кабинет"))
+    kb.add(KeyboardButton("Поддержка"))
     return kb
 
 
@@ -55,7 +56,7 @@ def instruction_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
         InlineKeyboardButton(
-            text="Тарифы",
+            text="Получить доступ",
             callback_data="get_access",
         )
     )

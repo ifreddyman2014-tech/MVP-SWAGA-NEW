@@ -12,7 +12,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.dispatcher.filters import Text
 
-from config import BOT_TOKEN, ADMIN_IDS, PLANS, INBOUND_ID, VPN_HOST, VPN_PORT, VPN_PATH
+from config import BOT_TOKEN, ADMIN_IDS, PLANS, INBOUND_ID, VPN_HOST, VPN_PORT, VPN_PATH, SUPPORT_URL
 from database import (
     init_db,
     get_user,
@@ -114,7 +114,7 @@ async def cmd_start(message: types.Message) -> None:
     await message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
 
 
-@dp.message_handler(Text(equals="Тарифы"))
+@dp.message_handler(Text(equals="Получить доступ"))
 async def handle_get_access(message: types.Message) -> None:
     """Показать доступные тарифные планы."""
     user = await get_user(message.from_user.id)
@@ -161,6 +161,15 @@ async def handle_cabinet(message: types.Message) -> None:
         "Скопируйте ссылку или нажмите кнопку ниже для быстрого подключения."
     )
     await message.answer(text, reply_markup=quick_connect_kb(vless_link))
+
+
+@dp.message_handler(Text(equals="Поддержка"))
+async def handle_support(message: types.Message) -> None:
+    """Перенаправление в бот техподдержки."""
+    await message.answer(
+        "💬 <b>Техподдержка</b>\n\n"
+        f"Для получения помощи перейдите в наш бот: {SUPPORT_URL}"
+    )
 
 
 @dp.message_handler(commands=["reset_me"])
