@@ -22,7 +22,7 @@ class XUIAPI:
 
     def __init__(self) -> None:
         self.session = requests.Session()
-        self.base_url = f"https://{XUI_HOST}:{XUI_PORT}{XUI_WEB_PATH}"
+        self.base_url = f"http://{XUI_HOST}:{XUI_PORT}{XUI_WEB_PATH}"
         self._logged_in = False
 
     # ── Аутентификация ────────────────────────────────────────────────────────
