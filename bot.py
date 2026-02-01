@@ -13,7 +13,7 @@ from aiogram.utils import executor
 from aiogram.dispatcher.filters import Text
 
 from config import (
-    BOT_TOKEN, ADMIN_IDS, PLANS, INBOUND_ID, SUPPORT_URL,
+    BOT_TOKEN, ADMIN_IDS, PLANS, INBOUND_ID, SUPPORT_URL, SUB_BASE_URL,
     VPN_HOST, VPN_PORT, VPN_TRANSPORT, VPN_PATH, VPN_CAMOUFLAGE_HOST, VPN_XHTTP_MODE,
     REALITY_PUBLIC_KEY, REALITY_SHORT_ID, REALITY_FINGERPRINT, REALITY_SNI, REALITY_SPIDERX,
 )
@@ -33,7 +33,7 @@ from database import (
 from xui_api import XUIAPI
 from payment import process_payment
 from backup import backup_now
-from utils import generate_uuid, format_date, build_vless_link
+from utils import generate_uuid, generate_sub_id, format_date, build_vless_link
 from keyboards import (
     main_menu_kb,
     plans_kb,
@@ -163,15 +163,21 @@ async def handle_cabinet(message: types.Message) -> None:
     plan_name = PLANS.get(sub["plan"], {}).get("name", sub["plan"])
     end_date = format_date(sub["end_date"])
 
+    cab_sub_id = sub.get("xui_sub_id", "")
+    cab_sub_url = f"{SUB_BASE_URL}{cab_sub_id}" if cab_sub_id else ""
+
     text = (
         "👤 <b>Личный кабинет</b>\n\n"
         f"📦 Тариф: <b>{plan_name}</b>\n"
         f"📅 Активна до: <b>{end_date}</b>\n\n"
         f"🔑 <b>Ваш конфиг (нажмите чтобы скопировать):</b>\n"
         f"<code>{vless_link}</code>\n\n"
-        "📲 Скопируйте ссылку и вставьте в приложение V2RayTun."
+        "📲 Нажмите на кнопку ниже для быстрого подключения."
     )
-    await message.answer(text, reply_markup=quick_connect_kb())
+    if cab_sub_url:
+        await message.answer(text, reply_markup=quick_connect_kb(cab_sub_url))
+    else:
+        await message.answer(text, reply_markup=cabinet_kb())
 
 
 @dp.message_handler(Text(equals="Поддержка"))
@@ -266,12 +272,13 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
 
     # ── Создание VPN-клиента ──────────────────────────────────────────────
     new_uuid = generate_uuid()
+    sub_id = generate_sub_id()
     email = f"tg_{user_id}_{plan_key}"
     now = datetime.utcnow()
     end = now + timedelta(days=plan["days"])
 
     try:
-        success = xui.add_client(INBOUND_ID, new_uuid, email)
+        success = xui.add_client(INBOUND_ID, new_uuid, email, sub_id=sub_id)
         if not success:
             raise RuntimeError("3X-UI add_client вернул False")
     except Exception as e:
@@ -292,6 +299,7 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
         start_date=now.isoformat(),
         end_date=end.isoformat(),
         vless_uuid=new_uuid,
+        xui_sub_id=sub_id,
     )
 
     # ── Формирование ответа ───────────────────────────────────────────────
@@ -310,15 +318,16 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
         reality_spx=REALITY_SPIDERX,
     )
 
+    sub_url = f"{SUB_BASE_URL}{sub_id}"
     text = (
         "✅ <b>Подписка активирована!</b>\n\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
         f"📅 Действует до: <b>{format_date(end)}</b>\n\n"
         f"🔑 <b>Ваш конфиг (нажмите чтобы скопировать):</b>\n"
         f"<code>{vless_link}</code>\n\n"
-        "📲 Скопируйте ссылку и вставьте в приложение V2RayTun."
+        "📲 Нажмите на кнопку ниже для быстрого подключения."
     )
-    await callback.message.answer(text, reply_markup=quick_connect_kb())
+    await callback.message.answer(text, reply_markup=quick_connect_kb(sub_url))
     await callback.answer()
 
 

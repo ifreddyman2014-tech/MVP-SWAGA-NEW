@@ -52,10 +52,11 @@ class XUIAPI:
 
     # ── Управление клиентами ──────────────────────────────────────────────────
 
-    def add_client(self, inbound_id: int, uuid: str, email: str) -> bool:
+    def add_client(self, inbound_id: int, uuid: str, email: str, sub_id: str = "") -> bool:
         """
         Добавить клиента к inbound.
         email используется как уникальный идентификатор внутри 3X-UI.
+        sub_id — идентификатор подписки для subscription URL.
         """
         self._ensure_login()
         url = f"{self.base_url}/panel/api/inbounds/addClient"
@@ -69,6 +70,7 @@ class XUIAPI:
                     "flow": "",
                     "limitIp": 0,
                     "totalGB": 0,
+                    "subId": sub_id,
                 }
             ]
         })

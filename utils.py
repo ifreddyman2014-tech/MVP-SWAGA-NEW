@@ -2,6 +2,8 @@
 Вспомогательные утилиты.
 """
 
+import secrets
+import string
 import uuid
 from datetime import datetime
 from urllib.parse import quote
@@ -10,6 +12,12 @@ from urllib.parse import quote
 def generate_uuid() -> str:
     """Сгенерировать новый UUID v4."""
     return str(uuid.uuid4())
+
+
+def generate_sub_id(length: int = 16) -> str:
+    """Сгенерировать случайный subId для подписки 3X-UI."""
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 def format_date(dt) -> str:
