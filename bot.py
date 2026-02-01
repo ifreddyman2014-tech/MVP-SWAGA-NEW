@@ -114,7 +114,7 @@ async def cmd_start(message: types.Message) -> None:
     await message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
 
 
-@dp.message_handler(Text(equals="🔐 Получить доступ"))
+@dp.message_handler(Text(equals="Тарифы"))
 async def handle_get_access(message: types.Message) -> None:
     """Показать доступные тарифные планы."""
     user = await get_user(message.from_user.id)
@@ -125,13 +125,13 @@ async def handle_get_access(message: types.Message) -> None:
     )
 
 
-@dp.message_handler(Text(equals="📖 Инструкция"))
+@dp.message_handler(Text(equals="Инструкция"))
 async def handle_instruction(message: types.Message) -> None:
     """Показать инструкцию по подключению."""
     await message.answer(INSTRUCTION_TEXT, reply_markup=instruction_kb())
 
 
-@dp.message_handler(Text(equals="👤 Личный кабинет"))
+@dp.message_handler(Text(equals="Личный кабинет"))
 async def handle_cabinet(message: types.Message) -> None:
     """Личный кабинет: статус подписки, конфиг, быстрое подключение."""
     user_id = message.from_user.id

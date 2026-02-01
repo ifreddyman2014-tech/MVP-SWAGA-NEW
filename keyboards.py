@@ -15,13 +15,11 @@ from config import PLANS, SUPPORT_URL
 # ── Reply-клавиатуры ──────────────────────────────────────────────────────────
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
-    """Главное меню бота."""
+    """Главное меню бота — три кнопки, каждая на отдельной строке."""
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("🔐 Получить доступ"))
-    kb.add(
-        KeyboardButton("📖 Инструкция"),
-        KeyboardButton("👤 Личный кабинет"),
-    )
+    kb.add(KeyboardButton("Тарифы"))
+    kb.add(KeyboardButton("Инструкция"))
+    kb.add(KeyboardButton("Личный кабинет"))
     return kb
 
 
@@ -57,13 +55,13 @@ def instruction_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
         InlineKeyboardButton(
-            text="🔐 Получить доступ",
+            text="Тарифы",
             callback_data="get_access",
         )
     )
     kb.add(
         InlineKeyboardButton(
-            text="💬 Техподдержка",
+            text="Техподдержка",
             url=SUPPORT_URL,
         )
     )
@@ -76,7 +74,7 @@ def quick_connect_kb(vless_link: str) -> InlineKeyboardMarkup:
     v2ray_url = f"v2raytun://install-config?url={vless_link}"
     kb.add(
         InlineKeyboardButton(
-            text="⚡ Быстрое подключение (V2RayTun)",
+            text="Быстрое подключение (V2RayTun)",
             url=v2ray_url,
         )
     )
@@ -88,7 +86,7 @@ def cabinet_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
         InlineKeyboardButton(
-            text="🔄 Продлить подписку",
+            text="Продлить подписку",
             callback_data="get_access",
         )
     )
