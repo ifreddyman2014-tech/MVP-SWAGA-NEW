@@ -5,6 +5,7 @@ aiogram v2 + asyncio scheduler для проверок подписок и бэ�
 
 import asyncio
 import logging
+import traceback
 from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, types
@@ -48,6 +49,31 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot)
 xui = XUIAPI()
+
+
+# ── Уведомления админам ──────────────────────────────────────────────────────
+
+async def notify_admins(text: str) -> None:
+    """Отправить сообщение всем администраторам."""
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, text, parse_mode=types.ParseMode.HTML)
+        except Exception as e:
+            logger.warning("Не удалось уведомить админа %s: %s", admin_id, e)
+
+
+async def notify_error(context: str, error: Exception) -> None:
+    """Отправить админам уведомление об ошибке."""
+    tb = traceback.format_exception(type(error), error, error.__traceback__)
+    short_tb = "".join(tb[-3:])[:500]
+    text = (
+        f"<b>SWAGA VPN Bot — ошибка</b>\n\n"
+        f"<b>Контекст:</b> {context}\n"
+        f"<b>Ошибка:</b> <code>{type(error).__name__}: {error}</code>\n\n"
+        f"<pre>{short_tb}</pre>"
+    )
+    await notify_admins(text)
+
 
 # ── Текстовые константы ──────────────────────────────────────────────────────
 WELCOME_TEXT = (
@@ -230,6 +256,7 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
             raise RuntimeError("3X-UI add_client вернул False")
     except Exception as e:
         logger.error("Ошибка создания VPN-клиента: %s", e)
+        await notify_error("Создание VPN-клиента", e)
         await callback.message.answer(
             "❌ Не удалось создать VPN-конфиг. Обратитесь в поддержку."
         )
@@ -305,6 +332,7 @@ async def _scheduler_expiration_check() -> None:
                     logger.warning("Не удалось отправить напоминание user=%s: %s", sub["user_id"], e)
         except Exception as e:
             logger.error("Ошибка при выборке expiring subs: %s", e)
+            await notify_error("Scheduler: проверка expiring", e)
 
         # Истекшие подписки
         try:
@@ -330,8 +358,14 @@ async def _scheduler_expiration_check() -> None:
                     )
                 except Exception as e:
                     logger.warning("Не удалось уведомить user=%s: %s", sub["user_id"], e)
+
+            if expired:
+                await notify_admins(
+                    f"📊 <b>Scheduler:</b> обработано {len(expired)} истёкших подписок."
+                )
         except Exception as e:
             logger.error("Ошибка при обработке expired subs: %s", e)
+            await notify_error("Scheduler: обработка expired", e)
 
 
 async def _scheduler_backup() -> None:
@@ -345,7 +379,11 @@ async def _scheduler_backup() -> None:
         await asyncio.sleep(wait_seconds)
 
         logger.info("Scheduler: создание бэкапа")
-        backup_now()
+        result = backup_now()
+        if result:
+            await notify_admins(f"💾 Бэкап создан: <code>{result}</code>")
+        else:
+            await notify_admins("⚠️ Ошибка при создании бэкапа! Проверьте логи.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -362,10 +400,19 @@ async def on_startup(_dp: Dispatcher) -> None:
     asyncio.create_task(_scheduler_backup())
     logger.info("Фоновые задачи запущены")
 
+    # Уведомление админам
+    now_str = datetime.utcnow().strftime("%d.%m.%Y %H:%M UTC")
+    await notify_admins(
+        f"✅ <b>SWAGA VPN Bot запущен</b>\n"
+        f"🕐 {now_str}\n"
+        f"📊 Scheduler и бэкапы активны."
+    )
+
 
 async def on_shutdown(_dp: Dispatcher) -> None:
     """Действия при остановке бота."""
     logger.info("Бот остановлен")
+    await notify_admins("🛑 <b>SWAGA VPN Bot остановлен.</b>")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
