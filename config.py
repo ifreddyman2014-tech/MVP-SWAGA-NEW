@@ -29,10 +29,23 @@ INBOUND_ID: int = int(os.getenv("INBOUND_ID", "1"))
 YOOKASSA_ID: str = os.getenv("YOOKASSA_ACCOUNT_ID", "")
 YOOKASSA_KEY: str = os.getenv("YOOKASSA_SECRET_KEY", "")
 
-# ── VPN connection defaults ───────────────────────────────────────────────────
-VPN_HOST: str = os.getenv("VPN_HOST", "yandex.ru")
+# ── VPN connection ───────────────────────────────────────────────────────────
+# VPN_HOST — публичный IP или домен сервера (для клиентского подключения)
+VPN_HOST: str = os.getenv("VPN_HOST", "")
+VPN_PORT: int = int(os.getenv("VPN_PORT", "19571"))
+
+# ── XHTTP transport ─────────────────────────────────────────────────────────
+VPN_TRANSPORT: str = os.getenv("VPN_TRANSPORT", "xhttp")
 VPN_PATH: str = os.getenv("VPN_PATH", "/adv")
-VPN_PORT: int = int(os.getenv("VPN_PORT", "443"))
+VPN_CAMOUFLAGE_HOST: str = os.getenv("VPN_CAMOUFLAGE_HOST", "yandex.ru")
+VPN_XHTTP_MODE: str = os.getenv("VPN_XHTTP_MODE", "packet-up")
+
+# ── Reality ──────────────────────────────────────────────────────────────────
+REALITY_PUBLIC_KEY: str = os.getenv("REALITY_PUBLIC_KEY", "")
+REALITY_SHORT_ID: str = os.getenv("REALITY_SHORT_ID", "")
+REALITY_FINGERPRINT: str = os.getenv("REALITY_FINGERPRINT", "chrome")
+REALITY_SNI: str = os.getenv("REALITY_SNI", "web.de")
+REALITY_SPIDERX: str = os.getenv("REALITY_SPIDERX", "/")
 
 # ── Links ─────────────────────────────────────────────────────────────────────
 SUPPORT_URL: str = os.getenv("SUPPORT_URL", "https://t.me/swagasupport_bot")

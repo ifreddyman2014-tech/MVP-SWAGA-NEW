@@ -21,15 +21,32 @@ def format_date(dt) -> str:
 
 def build_vless_link(
     uuid_str: str,
-    ip: str,
-    port: int,
     host: str,
+    port: int,
+    transport: str,
     path: str,
+    camouflage_host: str,
+    xhttp_mode: str,
+    reality_pbk: str,
+    reality_sid: str,
+    reality_fp: str,
+    reality_sni: str,
+    reality_spx: str,
 ) -> str:
-    """Сформировать VLESS-ссылку для подключения."""
+    """Сформировать VLESS Reality + XHTTP ссылку для подключения."""
     enc_path = quote(path, safe="")
+    enc_spx = quote(reality_spx, safe="")
     return (
-        f"vless://{uuid_str}@{ip}:{port}"
-        f"?type=tcp&security=tls&sni={host}&host={host}&path={enc_path}"
+        f"vless://{uuid_str}@{host}:{port}"
+        f"?type={transport}"
+        f"&path={enc_path}"
+        f"&host={camouflage_host}"
+        f"&mode={xhttp_mode}"
+        f"&security=reality"
+        f"&pbk={reality_pbk}"
+        f"&fp={reality_fp}"
+        f"&sni={reality_sni}"
+        f"&sid={reality_sid}"
+        f"&spx={enc_spx}"
         f"#VPN-SWAGA"
     )

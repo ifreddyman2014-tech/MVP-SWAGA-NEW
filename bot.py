@@ -12,7 +12,11 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.dispatcher.filters import Text
 
-from config import BOT_TOKEN, ADMIN_IDS, PLANS, INBOUND_ID, VPN_HOST, VPN_PORT, VPN_PATH, SUPPORT_URL
+from config import (
+    BOT_TOKEN, ADMIN_IDS, PLANS, INBOUND_ID, SUPPORT_URL,
+    VPN_HOST, VPN_PORT, VPN_TRANSPORT, VPN_PATH, VPN_CAMOUFLAGE_HOST, VPN_XHTTP_MODE,
+    REALITY_PUBLIC_KEY, REALITY_SHORT_ID, REALITY_FINGERPRINT, REALITY_SNI, REALITY_SPIDERX,
+)
 from database import (
     init_db,
     get_user,
@@ -143,10 +147,17 @@ async def handle_cabinet(message: types.Message) -> None:
 
     vless_link = build_vless_link(
         uuid_str=sub["vless_uuid"],
-        ip=VPN_HOST,
-        port=VPN_PORT,
         host=VPN_HOST,
+        port=VPN_PORT,
+        transport=VPN_TRANSPORT,
         path=VPN_PATH,
+        camouflage_host=VPN_CAMOUFLAGE_HOST,
+        xhttp_mode=VPN_XHTTP_MODE,
+        reality_pbk=REALITY_PUBLIC_KEY,
+        reality_sid=REALITY_SHORT_ID,
+        reality_fp=REALITY_FINGERPRINT,
+        reality_sni=REALITY_SNI,
+        reality_spx=REALITY_SPIDERX,
     )
 
     plan_name = PLANS.get(sub["plan"], {}).get("name", sub["plan"])
@@ -286,10 +297,17 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
     # ── Формирование ответа ───────────────────────────────────────────────
     vless_link = build_vless_link(
         uuid_str=new_uuid,
-        ip=VPN_HOST,
-        port=VPN_PORT,
         host=VPN_HOST,
+        port=VPN_PORT,
+        transport=VPN_TRANSPORT,
         path=VPN_PATH,
+        camouflage_host=VPN_CAMOUFLAGE_HOST,
+        xhttp_mode=VPN_XHTTP_MODE,
+        reality_pbk=REALITY_PUBLIC_KEY,
+        reality_sid=REALITY_SHORT_ID,
+        reality_fp=REALITY_FINGERPRINT,
+        reality_sni=REALITY_SNI,
+        reality_spx=REALITY_SPIDERX,
     )
 
     text = (

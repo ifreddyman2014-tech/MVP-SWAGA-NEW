@@ -66,7 +66,7 @@ class XUIAPI:
                     "email": email,
                     "enable": True,
                     "expiryTime": 0,
-                    "flow": "xtls-rprx-vision",
+                    "flow": "",
                     "limitIp": 0,
                     "totalGB": 0,
                 }
