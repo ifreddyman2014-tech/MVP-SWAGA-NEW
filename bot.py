@@ -156,11 +156,11 @@ async def handle_cabinet(message: types.Message) -> None:
         "👤 <b>Личный кабинет</b>\n\n"
         f"📦 Тариф: <b>{plan_name}</b>\n"
         f"📅 Активна до: <b>{end_date}</b>\n\n"
-        f"🔑 <b>Ваш конфиг:</b>\n"
+        f"🔑 <b>Ваш конфиг (нажмите чтобы скопировать):</b>\n"
         f"<code>{vless_link}</code>\n\n"
-        "Скопируйте ссылку или нажмите кнопку ниже для быстрого подключения."
+        "📲 Скопируйте ссылку и вставьте в приложение V2RayTun."
     )
-    await message.answer(text, reply_markup=quick_connect_kb(vless_link))
+    await message.answer(text, reply_markup=quick_connect_kb())
 
 
 @dp.message_handler(Text(equals="Поддержка"))
@@ -296,11 +296,11 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
         "✅ <b>Подписка активирована!</b>\n\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
         f"📅 Действует до: <b>{format_date(end)}</b>\n\n"
-        f"🔑 <b>Ваш конфиг:</b>\n"
+        f"🔑 <b>Ваш конфиг (нажмите чтобы скопировать):</b>\n"
         f"<code>{vless_link}</code>\n\n"
-        "Скопируйте ссылку или нажмите кнопку ниже для быстрого подключения."
+        "📲 Скопируйте ссылку и вставьте в приложение V2RayTun."
     )
-    await callback.message.answer(text, reply_markup=quick_connect_kb(vless_link))
+    await callback.message.answer(text, reply_markup=quick_connect_kb())
     await callback.answer()
 
 

@@ -69,14 +69,25 @@ def instruction_kb() -> InlineKeyboardMarkup:
     return kb
 
 
-def quick_connect_kb(vless_link: str) -> InlineKeyboardMarkup:
-    """Кнопка быстрого подключения через V2RayTun."""
-    kb = InlineKeyboardMarkup()
-    v2ray_url = f"v2raytun://install-config?url={vless_link}"
+def quick_connect_kb() -> InlineKeyboardMarkup:
+    """Кнопки после выдачи конфига: скачать приложение + поддержка."""
+    kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
         InlineKeyboardButton(
-            text="Быстрое подключение (V2RayTun)",
-            url=v2ray_url,
+            text="📲 Скачать V2RayTun (Android)",
+            url="https://play.google.com/store/apps/details?id=com.v2raytun.android",
+        )
+    )
+    kb.add(
+        InlineKeyboardButton(
+            text="📲 Скачать V2RayTun (iOS)",
+            url="https://apps.apple.com/app/v2raytun/id6476628951",
+        )
+    )
+    kb.add(
+        InlineKeyboardButton(
+            text="Техподдержка",
+            url=SUPPORT_URL,
         )
     )
     return kb
