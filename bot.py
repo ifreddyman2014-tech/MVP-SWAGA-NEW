@@ -165,7 +165,8 @@ async def handle_cabinet(message: types.Message) -> None:
     end_date = format_date(sub["end_date"])
 
     cab_sub_id = sub.get("xui_sub_id", "")
-    cab_sub_url = f"{SUB_BASE_URL}{cab_sub_id}" if cab_sub_id else ""
+    connect_base = SUB_BASE_URL.replace("/sub/", "/connect/")
+    cab_sub_url = f"{connect_base}{cab_sub_id}" if cab_sub_id else ""
 
     text = (
         "👤 <b>Личный кабинет</b>\n\n"
@@ -319,7 +320,8 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
         reality_spx=REALITY_SPIDERX,
     )
 
-    sub_url = f"{SUB_BASE_URL}{sub_id}"
+    connect_base = SUB_BASE_URL.replace("/sub/", "/connect/")
+    sub_url = f"{connect_base}{sub_id}"
     text = (
         "✅ <b>Подписка активирована!</b>\n\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
