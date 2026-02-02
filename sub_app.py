@@ -71,45 +71,94 @@ CONNECT_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SWAGA VPN — Подключение</title>
+<title>SWAGA VPN</title>
 <style>
-  body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-         text-align: center; padding: 40px 20px; background: #0d1117; color: #e6edf3; }}
-  h2 {{ margin-bottom: 10px; }}
-  .status {{ color: #58a6ff; font-size: 18px; margin: 20px 0; }}
-  .btn {{ display: inline-block; margin: 8px; padding: 14px 28px; border-radius: 12px;
-          text-decoration: none; font-size: 16px; font-weight: 600; }}
-  .btn-primary {{ background: #238636; color: #fff; }}
-  .btn-secondary {{ background: #21262d; color: #e6edf3; border: 1px solid #30363d; }}
-  .sub-url {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-              padding: 12px; margin: 20px auto; max-width: 400px; word-break: break-all;
-              font-family: monospace; font-size: 13px; color: #7ee787; }}
-  .hint {{ color: #8b949e; font-size: 14px; margin-top: 20px; }}
+  * {{ box-sizing: border-box; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         text-align: center; padding: 30px 16px; background: #0d1117; color: #e6edf3;
+         margin: 0; }}
+  h2 {{ margin: 0 0 6px; font-size: 22px; }}
+  .logo {{ font-size: 40px; margin-bottom: 8px; }}
+  .step {{ background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+           padding: 16px; margin: 14px auto; max-width: 380px; text-align: left; }}
+  .step-num {{ display: inline-block; width: 28px; height: 28px; line-height: 28px;
+               border-radius: 50%; background: #238636; color: #fff; text-align: center;
+               font-weight: 700; font-size: 14px; margin-right: 8px; flex-shrink: 0; }}
+  .step-row {{ display: flex; align-items: center; margin-bottom: 6px; }}
+  .step-text {{ font-size: 15px; }}
+  .btn {{ display: block; margin: 14px auto; padding: 16px 28px; border-radius: 12px;
+          text-decoration: none; font-size: 17px; font-weight: 600; cursor: pointer;
+          border: none; max-width: 380px; width: 100%; }}
+  .btn-copy {{ background: #238636; color: #fff; }}
+  .btn-copy.done {{ background: #1a7f37; }}
+  .btn-app {{ background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+              display: inline-block; width: auto; margin: 6px; padding: 12px 20px;
+              font-size: 14px; border-radius: 10px; }}
+  .apps {{ margin-top: 16px; }}
+  .hint {{ color: #8b949e; font-size: 13px; margin-top: 12px; }}
+  .hidden {{ display: none; }}
 </style>
 </head>
 <body>
+
+<div class="logo">&#x26A1;</div>
 <h2>SWAGA VPN</h2>
-<p class="status">Открываем приложение...</p>
+<p style="color:#8b949e; margin-top:4px;">Быстрое подключение</p>
 
-<div>
-  <a class="btn btn-primary" href="{vless_link}">Импорт конфига напрямую</a>
+<button class="btn btn-copy" id="copyBtn" onclick="copyConfig()">
+  &#x1F4CB; Скопировать конфиг
+</button>
+<p class="hint" id="copyHint"></p>
+
+<div class="step">
+  <div class="step-row"><span class="step-num">1</span>
+    <span class="step-text">Нажмите <b>«Скопировать конфиг»</b></span></div>
+  <div class="step-row"><span class="step-num">2</span>
+    <span class="step-text">Откройте <b>V2RayTun</b></span></div>
+  <div class="step-row"><span class="step-num">3</span>
+    <span class="step-text">Приложение предложит <b>импортировать</b> конфиг из буфера</span></div>
+  <div class="step-row"><span class="step-num">4</span>
+    <span class="step-text">Нажмите <b>подключиться</b></span></div>
 </div>
 
-<p class="hint">Если приложение не открылось, скачайте его:</p>
-<div>
-  <a class="btn btn-secondary" href="https://apps.apple.com/app/v2raytun/id6476628951">V2RayTun (iOS)</a>
-  <a class="btn btn-secondary" href="https://play.google.com/store/apps/details?id=com.v2raytun.android">V2RayTun (Android)</a>
+<div class="apps">
+  <p style="color:#8b949e; font-size:14px; margin-bottom:4px;">Скачать V2RayTun:</p>
+  <a class="btn btn-app" href="https://apps.apple.com/app/v2raytun/id6476628951">iOS (App Store)</a>
+  <a class="btn btn-app" href="https://play.google.com/store/apps/details?id=com.v2raytun.android">Android (Google Play)</a>
 </div>
 
-<p class="hint">Или добавьте подписку вручную:</p>
-<div class="sub-url">{sub_url}</div>
-<p class="hint">Скопируйте ссылку выше → Откройте V2RayTun → Подписка → Вставить</p>
+<input type="text" id="configData" value="{vless_link}" class="hidden">
 
 <script>
-// Попробовать открыть VLESS-ссылку напрямую (работает если приложение установлено)
-setTimeout(function() {{
-    window.location.href = "{vless_link}";
-}}, 500);
+function copyConfig() {{
+  var config = document.getElementById('configData').value;
+  var btn = document.getElementById('copyBtn');
+  var hint = document.getElementById('copyHint');
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {{
+    navigator.clipboard.writeText(config).then(function() {{
+      btn.innerHTML = '&#x2705; Скопировано!';
+      btn.classList.add('done');
+      hint.textContent = 'Теперь откройте V2RayTun';
+    }}).catch(fallbackCopy);
+  }} else {{
+    fallbackCopy();
+  }}
+
+  function fallbackCopy() {{
+    var inp = document.getElementById('configData');
+    inp.classList.remove('hidden');
+    inp.select();
+    try {{
+      document.execCommand('copy');
+      btn.innerHTML = '&#x2705; Скопировано!';
+      btn.classList.add('done');
+      hint.textContent = 'Теперь откройте V2RayTun';
+    }} catch(e) {{
+      hint.textContent = 'Выделите текст ниже и скопируйте вручную';
+    }}
+  }}
+}}
 </script>
 </body>
 </html>"""
