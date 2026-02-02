@@ -50,6 +50,7 @@ REALITY_SPIDERX: str = os.getenv("REALITY_SPIDERX", "/")
 # ── Links ─────────────────────────────────────────────────────────────────────
 SUPPORT_URL: str = os.getenv("SUPPORT_URL", "https://t.me/swagasupport_bot")
 SUB_BASE_URL: str = os.getenv("SUB_BASE_URL", "https://sub.swaga-vpn.ru/sub/")
+SUB_LISTEN_PORT: int = int(os.getenv("SUB_LISTEN_PORT", "8888"))
 
 # ── Subscription plans ────────────────────────────────────────────────────────
 PLANS: dict = {

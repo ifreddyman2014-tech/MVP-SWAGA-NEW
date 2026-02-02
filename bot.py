@@ -34,6 +34,7 @@ from xui_api import XUIAPI
 from payment import process_payment
 from backup import backup_now
 from utils import generate_uuid, generate_sub_id, format_date, build_vless_link
+from sub_app import start_sub_server, stop_sub_server
 from keyboards import (
     main_menu_kb,
     plans_kb,
@@ -431,6 +432,9 @@ async def on_startup(_dp: Dispatcher) -> None:
     await init_db()
     logger.info("База данных инициализирована")
 
+    # Запуск сервера подписок
+    await start_sub_server()
+
     # Запуск фоновых задач
     asyncio.create_task(_scheduler_expiration_check())
     asyncio.create_task(_scheduler_backup())
@@ -447,6 +451,7 @@ async def on_startup(_dp: Dispatcher) -> None:
 
 async def on_shutdown(_dp: Dispatcher) -> None:
     """Действия при остановке бота."""
+    await stop_sub_server()
     logger.info("Бот остановлен")
     await notify_admins("🛑 <b>SWAGA VPN Bot остановлен.</b>")
 

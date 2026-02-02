@@ -126,6 +126,20 @@ async def get_active_sub(user_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+async def get_sub_by_xui_id(xui_sub_id: str) -> dict | None:
+    """Find active subscription by 3X-UI subscription ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT * FROM subscriptions
+               WHERE xui_sub_id = ?
+               ORDER BY end_date DESC LIMIT 1""",
+            (xui_sub_id,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
 async def deactivate_subscription(sub_id: int) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
