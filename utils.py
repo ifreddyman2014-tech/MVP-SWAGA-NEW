@@ -40,10 +40,12 @@ def build_vless_link(
     reality_fp: str,
     reality_sni: str,
     reality_spx: str,
+    remark: str = "SWAGA VPN",
 ) -> str:
     """Сформировать VLESS Reality + XHTTP ссылку для подключения."""
     enc_path = quote(path, safe="")
     enc_spx = quote(reality_spx, safe="")
+    enc_remark = quote(remark, safe="")
     return (
         f"vless://{uuid_str}@{host}:{port}"
         f"?type={transport}"
@@ -56,5 +58,5 @@ def build_vless_link(
         f"&sni={reality_sni}"
         f"&sid={reality_sid}"
         f"&spx={enc_spx}"
-        f"#VPN-SWAGA"
+        f"#{enc_remark}"
     )

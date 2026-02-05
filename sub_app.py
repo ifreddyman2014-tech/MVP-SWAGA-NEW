@@ -19,7 +19,7 @@ from config import (
     SUB_LISTEN_PORT, SUB_BASE_URL,
 )
 from database import get_sub_by_xui_id
-from utils import build_vless_link
+from utils import build_vless_link, format_date
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,10 @@ async def handle_subscription(request: web.Request) -> web.Response:
     if not sub.get("is_active"):
         return web.Response(status=403, text="subscription expired")
 
+    # Формируем название: 🇩🇪 SWAGA VPN - до DD.MM.YYYY
+    end_date_str = format_date(sub["end_date"]) if sub.get("end_date") else ""
+    remark = f"🇩🇪 SWAGA VPN - до {end_date_str}" if end_date_str else "🇩🇪 SWAGA VPN"
+
     vless_link = build_vless_link(
         uuid_str=sub["vless_uuid"],
         host=VPN_HOST,
@@ -51,6 +55,7 @@ async def handle_subscription(request: web.Request) -> web.Response:
         reality_fp=REALITY_FINGERPRINT,
         reality_sni=REALITY_SNI,
         reality_spx=REALITY_SPIDERX,
+        remark=remark,
     )
 
     encoded = base64.b64encode(vless_link.encode()).decode()
@@ -182,6 +187,10 @@ async def handle_connect(request: web.Request) -> web.Response:
     if not sub.get("is_active"):
         return web.Response(status=403, text="subscription expired")
 
+    # Формируем название: 🇩🇪 SWAGA VPN - до DD.MM.YYYY
+    end_date_str = format_date(sub["end_date"]) if sub.get("end_date") else ""
+    remark = f"🇩🇪 SWAGA VPN - до {end_date_str}" if end_date_str else "🇩🇪 SWAGA VPN"
+
     vless_link = build_vless_link(
         uuid_str=sub["vless_uuid"],
         host=VPN_HOST,
@@ -195,6 +204,7 @@ async def handle_connect(request: web.Request) -> web.Response:
         reality_fp=REALITY_FINGERPRINT,
         reality_sni=REALITY_SNI,
         reality_spx=REALITY_SPIDERX,
+        remark=remark,
     )
 
     sub_url = f"{SUB_BASE_URL}{sub_id}"
