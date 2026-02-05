@@ -88,15 +88,17 @@ CONNECT_HTML = """<!DOCTYPE html>
   .step-text {{ font-size: 15px; }}
   .btn {{ display: block; margin: 14px auto; padding: 16px 28px; border-radius: 12px;
           text-decoration: none; font-size: 17px; font-weight: 600; cursor: pointer;
-          border: none; max-width: 380px; width: 100%; }}
-  .btn-copy {{ background: #238636; color: #fff; }}
-  .btn-copy.done {{ background: #1a7f37; }}
+          border: none; max-width: 380px; width: 100%; text-align: center; }}
+  .btn-primary {{ background: #238636; color: #fff; }}
+  .btn-primary:active {{ background: #1a7f37; }}
+  .btn-secondary {{ background: #21262d; color: #e6edf3; border: 1px solid #30363d; }}
   .btn-app {{ background: #21262d; color: #e6edf3; border: 1px solid #30363d;
               display: inline-block; width: auto; margin: 6px; padding: 12px 20px;
               font-size: 14px; border-radius: 10px; }}
   .apps {{ margin-top: 16px; }}
-  .hint {{ color: #8b949e; font-size: 13px; margin-top: 12px; }}
+  .hint {{ color: #8b949e; font-size: 13px; margin-top: 8px; }}
   .hidden {{ display: none; }}
+  .or {{ color: #8b949e; font-size: 14px; margin: 10px 0; }}
 </style>
 </head>
 <body>
@@ -105,26 +107,32 @@ CONNECT_HTML = """<!DOCTYPE html>
 <h2>SWAGA VPN</h2>
 <p style="color:#8b949e; margin-top:4px;">Быстрое подключение</p>
 
-<button class="btn btn-copy" id="copyBtn" onclick="copyConfig()">
-  &#x1F4CB; Скопировать конфиг
+<a class="btn btn-primary" id="openAppBtn" href="{deeplink}">
+  &#x1F680; Добавить подписку в V2RayTun
+</a>
+<p class="hint">Нажмите, чтобы автоматически добавить VPN</p>
+
+<p class="or">— или —</p>
+
+<button class="btn btn-secondary" id="copyBtn" onclick="copyConfig()">
+  &#x1F4CB; Скопировать конфиг вручную
 </button>
 <p class="hint" id="copyHint"></p>
 
 <div class="step">
+  <p style="color:#8b949e; font-size:14px; margin:0 0 10px;">Если автоматически не открылось:</p>
   <div class="step-row"><span class="step-num">1</span>
     <span class="step-text">Нажмите <b>«Скопировать конфиг»</b></span></div>
   <div class="step-row"><span class="step-num">2</span>
     <span class="step-text">Откройте <b>V2RayTun</b></span></div>
   <div class="step-row"><span class="step-num">3</span>
-    <span class="step-text">Приложение предложит <b>импортировать</b> конфиг из буфера</span></div>
-  <div class="step-row"><span class="step-num">4</span>
-    <span class="step-text">Нажмите <b>подключиться</b></span></div>
+    <span class="step-text">Приложение предложит <b>импортировать</b></span></div>
 </div>
 
 <div class="apps">
-  <p style="color:#8b949e; font-size:14px; margin-bottom:4px;">Скачать V2RayTun:</p>
-  <a class="btn btn-app" href="https://apps.apple.com/app/v2raytun/id6476628951">iOS (App Store)</a>
-  <a class="btn btn-app" href="https://play.google.com/store/apps/details?id=com.v2raytun.android">Android (Google Play)</a>
+  <p style="color:#8b949e; font-size:14px; margin-bottom:4px;">Нет приложения? Скачайте:</p>
+  <a class="btn btn-app" href="https://apps.apple.com/app/v2raytun/id6476628951">iOS</a>
+  <a class="btn btn-app" href="https://play.google.com/store/apps/details?id=com.v2raytun.android">Android</a>
 </div>
 
 <input type="text" id="configData" value="{vless_link}" class="hidden">
@@ -138,8 +146,7 @@ function copyConfig() {{
   if (navigator.clipboard && navigator.clipboard.writeText) {{
     navigator.clipboard.writeText(config).then(function() {{
       btn.innerHTML = '&#x2705; Скопировано!';
-      btn.classList.add('done');
-      hint.textContent = 'Теперь откройте V2RayTun';
+      hint.textContent = 'Откройте V2RayTun — он предложит импорт';
     }}).catch(fallbackCopy);
   }} else {{
     fallbackCopy();
@@ -152,8 +159,7 @@ function copyConfig() {{
     try {{
       document.execCommand('copy');
       btn.innerHTML = '&#x2705; Скопировано!';
-      btn.classList.add('done');
-      hint.textContent = 'Теперь откройте V2RayTun';
+      hint.textContent = 'Откройте V2RayTun — он предложит импорт';
     }} catch(e) {{
       hint.textContent = 'Выделите текст ниже и скопируйте вручную';
     }}
@@ -192,7 +198,9 @@ async def handle_connect(request: web.Request) -> web.Response:
     )
 
     sub_url = f"{SUB_BASE_URL}{sub_id}"
-    html = CONNECT_HTML.format(vless_link=vless_link, sub_url=sub_url)
+    # Deep link for V2RayTun: v2raytun://import/SUBSCRIPTION_URL
+    deeplink = f"v2raytun://import/{sub_url}"
+    html = CONNECT_HTML.format(vless_link=vless_link, sub_url=sub_url, deeplink=deeplink)
 
     return web.Response(text=html, content_type="text/html")
 
