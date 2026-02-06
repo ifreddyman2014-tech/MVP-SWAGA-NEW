@@ -7,6 +7,7 @@ Replaces 3X-UI's broken built-in subscription service that returns 127.0.0.1.
 
 import base64
 import logging
+from datetime import datetime
 from urllib.parse import quote
 
 from aiohttp import web
@@ -16,7 +17,7 @@ from config import (
     VPN_CAMOUFLAGE_HOST, VPN_XHTTP_MODE,
     REALITY_PUBLIC_KEY, REALITY_SHORT_ID, REALITY_FINGERPRINT,
     REALITY_SNI, REALITY_SPIDERX,
-    SUB_LISTEN_PORT, SUB_BASE_URL,
+    SUB_LISTEN_PORT, SUB_BASE_URL, SUPPORT_URL,
 )
 from database import get_sub_by_xui_id
 from utils import build_vless_link, format_date
@@ -60,13 +61,29 @@ async def handle_subscription(request: web.Request) -> web.Response:
 
     encoded = base64.b64encode(vless_link.encode()).decode()
 
+    # Вычисляем expire timestamp для V2RayTun
+    expire_ts = 0
+    if sub.get("end_date"):
+        try:
+            end_dt = sub["end_date"]
+            if isinstance(end_dt, str):
+                end_dt = datetime.fromisoformat(end_dt)
+            expire_ts = int(end_dt.timestamp())
+        except (ValueError, TypeError):
+            expire_ts = 0
+
+    # Лимит трафика: 100 ГБ = 107374182400 байт (0 = безлимит)
+    total_bytes = 107374182400
+
     return web.Response(
         text=encoded,
         content_type="text/plain",
         headers={
-            "subscription-userinfo": f"upload=0; download=0; total=0; expire=0",
+            "subscription-userinfo": f"upload=0; download=0; total={total_bytes}; expire={expire_ts}",
             "profile-update-interval": "12",
-            "content-disposition": "attachment; filename=VPN-SWAGA",
+            "profile-title": "SWAGA VPN",
+            "profile-web-page-url": SUPPORT_URL,
+            "content-disposition": "attachment; filename=SWAGA-VPN",
         },
     )
 
