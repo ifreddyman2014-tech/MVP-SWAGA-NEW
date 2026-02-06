@@ -46,6 +46,15 @@ async def init_db() -> None:
             await db.execute("ALTER TABLE subscriptions ADD COLUMN reminder_sent TEXT DEFAULT ''")
         except Exception:
             pass  # колонка уже существует
+        # Миграция: добавить реферальные колонки
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER DEFAULT NULL")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN referral_bonus_given INTEGER DEFAULT 0")
+        except Exception:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -245,3 +254,140 @@ async def add_transaction(user_id: int, amount: float, status: str) -> None:
             (user_id, amount, status, datetime.utcnow().isoformat()),
         )
         await db.commit()
+
+
+# ── Referral functions ────────────────────────────────────────────────────────
+
+REFERRAL_BONUS_DAYS = 7  # Бонус дней за реферала
+
+
+async def set_referrer(user_id: int, referrer_id: int) -> bool:
+    """
+    Установить реферера для пользователя.
+    Возвращает True если реферер установлен, False если уже был или это сам пользователь.
+    """
+    if user_id == referrer_id:
+        return False
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Проверяем, нет ли уже реферера
+        cursor = await db.execute(
+            "SELECT referred_by FROM users WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        if row and row[0]:
+            return False  # Уже есть реферер
+
+        # Проверяем, существует ли реферер
+        cursor = await db.execute(
+            "SELECT user_id FROM users WHERE user_id = ?", (referrer_id,)
+        )
+        if not await cursor.fetchone():
+            return False  # Реферер не найден
+
+        await db.execute(
+            "UPDATE users SET referred_by = ? WHERE user_id = ?",
+            (referrer_id, user_id),
+        )
+        await db.commit()
+        return True
+
+
+async def get_referral_stats(user_id: int) -> dict:
+    """Получить статистику рефералов пользователя."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Количество приглашённых
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM users WHERE referred_by = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        total_referrals = row[0] if row else 0
+
+        # Количество активированных (тех, кто получил trial или подписку)
+        cursor = await db.execute(
+            """SELECT COUNT(*) FROM users u
+               WHERE u.referred_by = ? AND u.referral_bonus_given = 1""",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        activated_referrals = row[0] if row else 0
+
+        # Заработано дней
+        bonus_days = activated_referrals * REFERRAL_BONUS_DAYS
+
+        return {
+            "total": total_referrals,
+            "activated": activated_referrals,
+            "bonus_days": bonus_days,
+        }
+
+
+async def process_referral_bonus(user_id: int) -> int | None:
+    """
+    Обработать реферальный бонус при активации пробного периода.
+    Возвращает ID реферера, если бонус выдан, иначе None.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        # Получаем пользователя
+        cursor = await db.execute(
+            "SELECT referred_by, referral_bonus_given FROM users WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+
+        referred_by = row["referred_by"]
+        bonus_given = row["referral_bonus_given"]
+
+        # Если нет реферера или бонус уже выдан
+        if not referred_by or bonus_given:
+            return None
+
+        # Помечаем бонус как выданный
+        await db.execute(
+            "UPDATE users SET referral_bonus_given = 1 WHERE user_id = ?",
+            (user_id,),
+        )
+        await db.commit()
+
+        return referred_by
+
+
+async def extend_subscription(user_id: int, days: int) -> bool:
+    """
+    Продлить активную подписку на указанное количество дней.
+    Возвращает True если продлено, False если нет активной подписки.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        # Получаем активную подписку
+        cursor = await db.execute(
+            """SELECT sub_id, end_date FROM subscriptions
+               WHERE user_id = ? AND is_active = 1
+               ORDER BY end_date DESC LIMIT 1""",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return False
+
+        # Продлеваем
+        current_end = datetime.fromisoformat(row["end_date"])
+        new_end = current_end + timedelta(days=days)
+
+        await db.execute(
+            "UPDATE subscriptions SET end_date = ? WHERE sub_id = ?",
+            (new_end.isoformat(), row["sub_id"]),
+        )
+        await db.commit()
+        return True
+
+
+async def count_users() -> int:
+    """Получить общее количество пользователей."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM users")
+        row = await cursor.fetchone()
+        return row[0] if row else 0

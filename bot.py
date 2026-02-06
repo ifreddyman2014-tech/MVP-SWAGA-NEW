@@ -31,6 +31,12 @@ from database import (
     list_expired,
     get_subs_for_reminder,
     mark_reminder_sent,
+    set_referrer,
+    get_referral_stats,
+    process_referral_bonus,
+    extend_subscription,
+    count_users,
+    REFERRAL_BONUS_DAYS,
 )
 from xui_api import XUIAPI
 from payment import process_payment
@@ -114,10 +120,24 @@ NO_ACTIVE_SUB_TEXT = (
 
 @dp.message_handler(commands=["start"])
 async def cmd_start(message: types.Message) -> None:
-    """Регистрация пользователя и вывод главного меню."""
+    """Регистрация пользователя и вывод главного меню. Обработка реферальных ссылок."""
     user_id = message.from_user.id
     username = message.from_user.username or message.from_user.first_name or ""
+
+    # Проверяем, новый ли пользователь
+    existing_user = await get_user(user_id)
     await create_user(user_id, username)
+
+    # Обработка реферальной ссылки: /start ref_123456
+    args = message.get_args()
+    if args and args.startswith("ref_") and not existing_user:
+        try:
+            referrer_id = int(args[4:])
+            if await set_referrer(user_id, referrer_id):
+                logger.info("Реферал: user=%s привёл user=%s", referrer_id, user_id)
+        except (ValueError, TypeError):
+            pass  # Невалидный ID
+
     await message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
 
 
@@ -191,6 +211,29 @@ async def handle_support(message: types.Message) -> None:
         "💬 <b>Техподдержка</b>\n\n"
         f"Для получения помощи перейдите в наш бот: {SUPPORT_URL}"
     )
+
+
+@dp.message_handler(Text(equals="Рефералы"))
+async def handle_referrals(message: types.Message) -> None:
+    """Показать реферальную ссылку и статистику."""
+    user_id = message.from_user.id
+    bot_info = await bot.get_me()
+    ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
+
+    stats = await get_referral_stats(user_id)
+
+    text = (
+        "👥 <b>Реферальная программа</b>\n\n"
+        f"🔗 <b>Ваша ссылка:</b>\n<code>{ref_link}</code>\n\n"
+        "📋 <b>Как это работает:</b>\n"
+        f"• Поделитесь ссылкой с друзьями\n"
+        f"• Когда друг активирует подписку — вы оба получите <b>+{REFERRAL_BONUS_DAYS} дней</b>\n\n"
+        "📊 <b>Ваша статистика:</b>\n"
+        f"• Приглашено: <b>{stats['total']}</b>\n"
+        f"• Активировали подписку: <b>{stats['activated']}</b>\n"
+        f"• Заработано дней: <b>{stats['bonus_days']}</b>"
+    )
+    await message.answer(text)
 
 
 @dp.message_handler(commands=["reset_me"])
@@ -306,6 +349,28 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
         xui_sub_id=sub_id,
     )
 
+    # ── Реферальный бонус ─────────────────────────────────────────────────
+    referral_bonus_text = ""
+    referrer_id = await process_referral_bonus(user_id)
+    if referrer_id:
+        # Продлеваем подписку рефереру
+        referrer_extended = await extend_subscription(referrer_id, REFERRAL_BONUS_DAYS)
+        if referrer_extended:
+            try:
+                await bot.send_message(
+                    referrer_id,
+                    f"🎉 <b>Реферальный бонус!</b>\n\n"
+                    f"Ваш друг активировал подписку.\n"
+                    f"Вам добавлено <b>+{REFERRAL_BONUS_DAYS} дней</b> к подписке!",
+                    parse_mode=types.ParseMode.HTML,
+                )
+            except Exception as e:
+                logger.warning("Не удалось уведомить реферера %s: %s", referrer_id, e)
+        # Продлеваем подписку приглашённому
+        await extend_subscription(user_id, REFERRAL_BONUS_DAYS)
+        referral_bonus_text = f"\n🎁 <b>Реферальный бонус:</b> +{REFERRAL_BONUS_DAYS} дней!"
+        end = end + timedelta(days=REFERRAL_BONUS_DAYS)  # Обновляем дату для отображения
+
     # ── Формирование ответа ───────────────────────────────────────────────
     vless_link = build_vless_link(
         uuid_str=new_uuid,
@@ -327,7 +392,8 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
     text = (
         "✅ <b>Подписка активирована!</b>\n\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
-        f"📅 Действует до: <b>{format_date(end)}</b>\n\n"
+        f"📅 Действует до: <b>{format_date(end)}</b>"
+        f"{referral_bonus_text}\n\n"
         f"🔑 <b>Ваш конфиг (нажмите чтобы скопировать):</b>\n"
         f"<code>{vless_link}</code>\n\n"
         "📲 Нажмите на кнопку ниже для быстрого подключения."
