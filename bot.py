@@ -606,21 +606,24 @@ async def on_startup(_dp: Dispatcher) -> None:
     logger.info("База данных инициализирована")
 
     # Удаление старых команд и установка новых (меню слева)
-    # Удаляем для всех scope
-    for scope in [
-        types.BotCommandScopeDefault(),
-        types.BotCommandScopeAllPrivateChats(),
-        types.BotCommandScopeAllGroupChats(),
-    ]:
-        try:
-            await bot.delete_my_commands(scope=scope)
-        except Exception:
-            pass
-    # Устанавливаем новые команды
-    await bot.set_my_commands([
-        types.BotCommand("start", "Главное меню"),
-    ])
-    logger.info("Команды бота установлены")
+    try:
+        # Удаляем для всех scope
+        for scope in [
+            types.BotCommandScopeDefault(),
+            types.BotCommandScopeAllPrivateChats(),
+            types.BotCommandScopeAllGroupChats(),
+        ]:
+            try:
+                await bot.delete_my_commands(scope=scope)
+            except Exception:
+                pass
+        # Устанавливаем новые команды
+        await bot.set_my_commands([
+            types.BotCommand("start", "Главное меню"),
+        ])
+        logger.info("Команды бота установлены")
+    except Exception as e:
+        logger.error("Ошибка установки команд: %s", e)
 
     # Запуск сервера подписок
     await start_sub_server()
