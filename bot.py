@@ -29,6 +29,8 @@ from database import (
     deactivate_user_subs,
     list_expiring,
     list_expired,
+    get_subs_for_reminder,
+    mark_reminder_sent,
 )
 from xui_api import XUIAPI
 from payment import process_payment
@@ -407,6 +409,77 @@ async def _scheduler_expiration_check() -> None:
             await notify_error("Scheduler: обработка expired", e)
 
 
+async def _scheduler_reminders() -> None:
+    """
+    Проверка каждый час — отправка напоминаний:
+    - За 3 дня (72 часа)
+    - За 1 день (24 часа)
+    - За 3 часа
+    """
+    # Небольшая задержка при старте, чтобы бот успел инициализироваться
+    await asyncio.sleep(60)
+
+    while True:
+        try:
+            logger.info("Scheduler: проверка напоминаний")
+
+            # Напоминания за 3 дня (72 часа)
+            subs_3d = await get_subs_for_reminder(hours=72, reminder_code="3d")
+            for sub in subs_3d:
+                try:
+                    end_str = format_date(sub["end_date"])
+                    await bot.send_message(
+                        sub["user_id"],
+                        f"⏳ <b>Напоминание!</b>\n\n"
+                        f"Ваша подписка истекает через <b>3 дня</b> ({end_str}).\n"
+                        f"Продлите её заранее, чтобы не потерять доступ к VPN!",
+                        parse_mode=types.ParseMode.HTML,
+                    )
+                    await mark_reminder_sent(sub["sub_id"], "3d")
+                    logger.info("Напоминание 3d отправлено user=%s", sub["user_id"])
+                except Exception as e:
+                    logger.warning("Не удалось отправить напоминание 3d user=%s: %s", sub["user_id"], e)
+
+            # Напоминания за 1 день (24 часа)
+            subs_1d = await get_subs_for_reminder(hours=24, reminder_code="1d")
+            for sub in subs_1d:
+                try:
+                    end_str = format_date(sub["end_date"])
+                    await bot.send_message(
+                        sub["user_id"],
+                        f"⚠️ <b>Подписка истекает завтра!</b>\n\n"
+                        f"Дата окончания: <b>{end_str}</b>\n"
+                        f"Успейте продлить, чтобы VPN продолжил работать!",
+                        parse_mode=types.ParseMode.HTML,
+                    )
+                    await mark_reminder_sent(sub["sub_id"], "1d")
+                    logger.info("Напоминание 1d отправлено user=%s", sub["user_id"])
+                except Exception as e:
+                    logger.warning("Не удалось отправить напоминание 1d user=%s: %s", sub["user_id"], e)
+
+            # Напоминания за 3 часа
+            subs_3h = await get_subs_for_reminder(hours=3, reminder_code="3h")
+            for sub in subs_3h:
+                try:
+                    await bot.send_message(
+                        sub["user_id"],
+                        f"🔴 <b>Срочно! Подписка истекает через 3 часа!</b>\n\n"
+                        f"После истечения VPN перестанет работать.\n"
+                        f"Нажмите «Получить доступ», чтобы продлить прямо сейчас!",
+                        parse_mode=types.ParseMode.HTML,
+                    )
+                    await mark_reminder_sent(sub["sub_id"], "3h")
+                    logger.info("Напоминание 3h отправлено user=%s", sub["user_id"])
+                except Exception as e:
+                    logger.warning("Не удалось отправить напоминание 3h user=%s: %s", sub["user_id"], e)
+
+        except Exception as e:
+            logger.error("Ошибка в scheduler_reminders: %s", e)
+
+        # Ждём 1 час до следующей проверки
+        await asyncio.sleep(3600)
+
+
 async def _scheduler_backup() -> None:
     """Ежедневный бэкап в 03:00 UTC."""
     while True:
@@ -439,6 +512,7 @@ async def on_startup(_dp: Dispatcher) -> None:
 
     # Запуск фоновых задач
     asyncio.create_task(_scheduler_expiration_check())
+    asyncio.create_task(_scheduler_reminders())
     asyncio.create_task(_scheduler_backup())
     logger.info("Фоновые задачи запущены")
 

@@ -41,6 +41,11 @@ async def init_db() -> None:
             await db.execute("ALTER TABLE subscriptions ADD COLUMN xui_sub_id TEXT DEFAULT ''")
         except Exception:
             pass  # колонка уже существует
+        # Миграция: добавить reminder_sent для отслеживания отправленных напоминаний
+        try:
+            await db.execute("ALTER TABLE subscriptions ADD COLUMN reminder_sent TEXT DEFAULT ''")
+        except Exception:
+            pass  # колонка уже существует
         await db.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -182,6 +187,52 @@ async def list_expired() -> list[dict]:
         )
         rows = await cursor.fetchall()
         return [dict(r) for r in rows]
+
+
+# ── Reminder functions ────────────────────────────────────────────────────────
+
+async def get_subs_for_reminder(hours: int, reminder_code: str) -> list[dict]:
+    """
+    Получить подписки, которые истекают в пределах указанных часов
+    и которым ещё не было отправлено это напоминание.
+
+    reminder_code: "3d", "1d", "3h"
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        now = datetime.utcnow()
+        target = (now + timedelta(hours=hours)).isoformat()
+        now_iso = now.isoformat()
+        cursor = await db.execute(
+            """SELECT * FROM subscriptions
+               WHERE is_active = 1
+               AND end_date <= ?
+               AND end_date > ?
+               AND (reminder_sent IS NULL OR reminder_sent NOT LIKE ?)""",
+            (target, now_iso, f"%{reminder_code}%"),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def mark_reminder_sent(sub_id: int, reminder_code: str) -> None:
+    """Отметить, что напоминание отправлено."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Получаем текущее значение
+        cursor = await db.execute(
+            "SELECT reminder_sent FROM subscriptions WHERE sub_id = ?", (sub_id,)
+        )
+        row = await cursor.fetchone()
+        current = row[0] if row and row[0] else ""
+
+        # Добавляем новый код, если его ещё нет
+        if reminder_code not in current:
+            new_value = f"{current},{reminder_code}" if current else reminder_code
+            await db.execute(
+                "UPDATE subscriptions SET reminder_sent = ? WHERE sub_id = ?",
+                (new_value, sub_id),
+            )
+            await db.commit()
 
 
 # ── Transactions ──────────────────────────────────────────────────────────────
