@@ -53,7 +53,18 @@ def plans_kb(trial_used: bool) -> InlineKeyboardMarkup:
 
 def instruction_kb() -> InlineKeyboardMarkup:
     """Клавиатура на экране инструкции."""
-    kb = InlineKeyboardMarkup(row_width=1)
+    kb = InlineKeyboardMarkup(row_width=2)
+    # Ссылки на скачивание V2RayTun
+    kb.add(
+        InlineKeyboardButton(
+            text="📱 iOS (App Store)",
+            url="https://apps.apple.com/app/v2raytun/id6476628951",
+        ),
+        InlineKeyboardButton(
+            text="📱 Android (Google Play)",
+            url="https://play.google.com/store/apps/details?id=com.v2raytun.android",
+        ),
+    )
     kb.add(
         InlineKeyboardButton(
             text="Получить доступ",
