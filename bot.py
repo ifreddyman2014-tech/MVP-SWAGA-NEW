@@ -573,6 +573,12 @@ async def on_startup(_dp: Dispatcher) -> None:
     await init_db()
     logger.info("База данных инициализирована")
 
+    # Установка команд бота (меню слева)
+    await bot.set_my_commands([
+        types.BotCommand("start", "Главное меню"),
+    ])
+    logger.info("Команды бота установлены")
+
     # Запуск сервера подписок
     await start_sub_server()
 
