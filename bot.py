@@ -574,7 +574,17 @@ async def on_startup(_dp: Dispatcher) -> None:
     logger.info("База данных инициализирована")
 
     # Удаление старых команд и установка новых (меню слева)
-    await bot.delete_my_commands()
+    # Удаляем для всех scope
+    for scope in [
+        types.BotCommandScopeDefault(),
+        types.BotCommandScopeAllPrivateChats(),
+        types.BotCommandScopeAllGroupChats(),
+    ]:
+        try:
+            await bot.delete_my_commands(scope=scope)
+        except Exception:
+            pass
+    # Устанавливаем новые команды
     await bot.set_my_commands([
         types.BotCommand("start", "Главное меню"),
     ])
