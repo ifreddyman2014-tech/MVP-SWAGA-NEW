@@ -9,6 +9,7 @@ import traceback
 from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, types
+from aiogram.types import InputFile
 from aiogram.utils import executor
 from aiogram.dispatcher.filters import Text
 
@@ -89,6 +90,8 @@ async def notify_error(context: str, error: Exception) -> None:
 
 
 # ── Текстовые константы ──────────────────────────────────────────────────────
+LOGO_PATH = "logo.png"
+
 WELCOME_TEXT = (
     "👋 <b>Добро пожаловать в SWAGA</b>\n\n"
     "Скорость. Приватность. Контроль — в одном клике.\n\n"
@@ -144,7 +147,11 @@ async def cmd_start(message: types.Message) -> None:
         except (ValueError, TypeError):
             pass  # Невалидный ID
 
-    await message.answer(WELCOME_TEXT, reply_markup=main_menu_kb())
+    await message.answer_photo(
+        InputFile(LOGO_PATH),
+        caption=WELCOME_TEXT,
+        reply_markup=main_menu_kb(),
+    )
 
 
 @dp.message_handler(Text(equals="Получить доступ"))
