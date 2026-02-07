@@ -22,7 +22,9 @@ class XUIAPI:
 
     def __init__(self) -> None:
         self.session = requests.Session()
-        self.base_url = f"http://{XUI_HOST}:{XUI_PORT}{XUI_WEB_PATH}"
+        # Используем HTTPS для порта 443, HTTP для остальных
+        protocol = "https" if XUI_PORT == "443" else "http"
+        self.base_url = f"{protocol}://{XUI_HOST}:{XUI_PORT}{XUI_WEB_PATH}"
         self._logged_in = False
 
     # ── Аутентификация ────────────────────────────────────────────────────────
