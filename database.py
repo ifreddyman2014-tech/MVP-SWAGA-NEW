@@ -391,6 +391,31 @@ async def extend_subscription(user_id: int, days: int) -> bool:
         return True
 
 
+async def extend_subscription_to_date(user_id: int, new_end: datetime) -> bool:
+    """
+    Продлить активную подписку до указанной даты.
+    Возвращает True если продлено, False если нет активной подписки.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT sub_id FROM subscriptions
+               WHERE user_id = ? AND is_active = 1
+               ORDER BY end_date DESC LIMIT 1""",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return False
+
+        await db.execute(
+            "UPDATE subscriptions SET end_date = ? WHERE sub_id = ?",
+            (new_end.isoformat(), row["sub_id"]),
+        )
+        await db.commit()
+        return True
+
+
 async def count_users() -> int:
     """Получить общее количество пользователей."""
     async with aiosqlite.connect(DB_PATH) as db:

@@ -36,6 +36,7 @@ from database import (
     get_referral_stats,
     process_referral_bonus,
     extend_subscription,
+    extend_subscription_to_date,
     count_users,
     REFERRAL_BONUS_DAYS,
 )
@@ -622,72 +623,111 @@ async def _create_subscription_on_server(
             )
             return
 
-    # ── Выбор сервера ─────────────────────────────────────────────────────
-    from servers import server_manager
-
-    if not server_manager.servers:
-        server_manager.load_config()
-
-    if server_id:
-        server = server_manager.get_server(server_id)
-    else:
-        server = server_manager.get_best_server()
-
-    # Если нет серверов в мультисервере — используем текущий из .env
-    use_default = server is None
-
-    # ── Создание VPN-клиента ──────────────────────────────────────────────
-    new_uuid = generate_uuid()
-    sub_id = generate_sub_id()
+    # ── Проверяем, есть ли активная подписка (для продления) ─────────────
+    existing_sub = await get_active_sub(user_id)
     now = datetime.utcnow()
-    email = f"tg_{user_id}_{int(now.timestamp())}"
-    end = now + timedelta(days=plan["days"])
 
-    try:
-        if use_default:
-            # Используем дефолтный xui из .env
-            success = xui.add_client(INBOUND_ID, new_uuid, email, sub_id=sub_id)
+    # ── Если есть активная подписка — продлеваем её ────────────────────────
+    if existing_sub and existing_sub.get("vless_uuid"):
+        # Продление: добавляем дни к текущей дате окончания
+        current_end = datetime.fromisoformat(existing_sub["end_date"])
+        # Если подписка ещё не истекла — добавляем к ней, иначе от сейчас
+        base_date = max(current_end, now)
+        new_end = base_date + timedelta(days=plan["days"])
+
+        # Обновляем дату окончания в БД
+        await extend_subscription_to_date(user_id, new_end)
+
+        # Используем существующий конфиг
+        new_uuid = existing_sub["vless_uuid"]
+        sub_id = existing_sub.get("xui_sub_id", "")
+        actual_server_id = existing_sub.get("server_id", "default")
+
+        # Определяем хост для ссылки
+        from servers import server_manager
+        if not server_manager.servers:
+            server_manager.load_config()
+
+        if actual_server_id and actual_server_id != "default":
+            server = server_manager.get_server(actual_server_id)
+            vpn_host = server.host if server else VPN_HOST
+            vpn_port = server.vpn_port if server else VPN_PORT
+        else:
             vpn_host = VPN_HOST
             vpn_port = VPN_PORT
-            actual_server_id = "default"
+
+        end = new_end
+        is_extension = True
+
+    else:
+        # ── Новая подписка — создаём VPN-клиент ────────────────────────────
+        is_extension = False
+
+        # Выбор сервера
+        from servers import server_manager
+
+        if not server_manager.servers:
+            server_manager.load_config()
+
+        if server_id:
+            server = server_manager.get_server(server_id)
         else:
-            # Используем выбранный сервер
-            from xui_api import XUIAPI
-            server_xui = XUIAPI()
-            server_xui.base_url = f"http://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
-            server_xui.session.post(
-                f"{server_xui.base_url}/login",
-                json={"username": server.xui_username, "password": server.xui_password},
-                verify=False,
-                timeout=10,
+            server = server_manager.get_best_server()
+
+        # Если нет серверов в мультисервере — используем текущий из .env
+        use_default = server is None
+
+        # Создание VPN-клиента
+        new_uuid = generate_uuid()
+        sub_id = generate_sub_id()
+        email = f"tg_{user_id}_{int(now.timestamp())}"
+        end = now + timedelta(days=plan["days"])
+
+        try:
+            if use_default:
+                # Используем дефолтный xui из .env
+                success = xui.add_client(INBOUND_ID, new_uuid, email, sub_id=sub_id)
+                vpn_host = VPN_HOST
+                vpn_port = VPN_PORT
+                actual_server_id = "default"
+            else:
+                # Используем выбранный сервер
+                from xui_api import XUIAPI
+                server_xui = XUIAPI()
+                server_xui.base_url = f"http://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+                server_xui.session.post(
+                    f"{server_xui.base_url}/login",
+                    json={"username": server.xui_username, "password": server.xui_password},
+                    verify=False,
+                    timeout=10,
+                )
+                success = server_xui.add_client(server.inbound_id, new_uuid, email, sub_id=sub_id)
+                vpn_host = server.host
+                vpn_port = server.vpn_port
+                actual_server_id = server.id
+                server.current_users += 1
+
+            if not success:
+                raise RuntimeError("3X-UI add_client вернул False")
+        except Exception as e:
+            logger.error("Ошибка создания VPN-клиента: %s", e)
+            await notify_error("Создание VPN-клиента", e)
+            await callback.message.answer(
+                "❌ Не удалось создать VPN-конфиг. Обратитесь в поддержку."
             )
-            success = server_xui.add_client(server.inbound_id, new_uuid, email, sub_id=sub_id)
-            vpn_host = server.host
-            vpn_port = server.vpn_port
-            actual_server_id = server.id
-            server.current_users += 1
+            return
 
-        if not success:
-            raise RuntimeError("3X-UI add_client вернул False")
-    except Exception as e:
-        logger.error("Ошибка создания VPN-клиента: %s", e)
-        await notify_error("Создание VPN-клиента", e)
-        await callback.message.answer(
-            "❌ Не удалось создать VPN-конфиг. Обратитесь в поддержку."
+        # Сохранение новой подписки в БД
+        await deactivate_user_subs(user_id)
+        await create_subscription(
+            user_id=user_id,
+            plan=plan_key,
+            start_date=now.isoformat(),
+            end_date=end.isoformat(),
+            vless_uuid=new_uuid,
+            xui_sub_id=sub_id,
+            server_id=actual_server_id,
         )
-        return
-
-    # ── Сохранение подписки в БД ──────────────────────────────────────────
-    await deactivate_user_subs(user_id)
-    await create_subscription(
-        user_id=user_id,
-        plan=plan_key,
-        start_date=now.isoformat(),
-        end_date=end.isoformat(),
-        vless_uuid=new_uuid,
-        xui_sub_id=sub_id,
-        server_id=actual_server_id,
-    )
 
     # ── Реферальный бонус ─────────────────────────────────────────────────
     referral_bonus_text = ""
@@ -727,13 +767,22 @@ async def _create_subscription_on_server(
 
     # Добавляем информацию о сервере
     server_info = ""
-    if not use_default and server:
-        server_info = f"\n🌍 Сервер: <b>{server.name}</b>"
+    if actual_server_id and actual_server_id != "default":
+        srv = server_manager.get_server(actual_server_id)
+        if srv:
+            server_info = f"\n🌍 Сервер: <b>{srv.name}</b>"
 
     connect_base = SUB_BASE_URL.replace("/sub/", "/connect/")
     sub_url = f"{connect_base}{sub_id}"
+
+    # Разный текст для продления и новой подписки
+    if is_extension:
+        action_text = "✅ <b>Подписка продлена!</b>"
+    else:
+        action_text = "✅ <b>Подписка активирована!</b>"
+
     text = (
-        "✅ <b>Подписка активирована!</b>\n\n"
+        f"{action_text}\n\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
         f"📅 Действует до: <b>{format_date(end)}</b>"
         f"{server_info}"
@@ -744,11 +793,12 @@ async def _create_subscription_on_server(
     )
     await callback.message.answer(text, reply_markup=quick_connect_kb(sub_url))
 
-    # ── Уведомление админам о новой подписке ───────────────────────────────
+    # ── Уведомление админам о подписке ────────────────────────────────────
     username = callback.from_user.username
     user_link = f"@{username}" if username else f"ID: {user_id}"
+    admin_action = "🔄 <b>Продление подписки!</b>" if is_extension else "💰 <b>Новая подписка!</b>"
     await notify_admins(
-        f"💰 <b>Новая подписка!</b>\n\n"
+        f"{admin_action}\n\n"
         f"👤 Пользователь: {user_link}\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
         f"💵 Сумма: <b>{plan['price']} ₽</b>\n"
