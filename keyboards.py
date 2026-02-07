@@ -15,12 +15,11 @@ from config import PLANS, SUPPORT_URL
 # ── Reply-клавиатуры ──────────────────────────────────────────────────────────
 
 def main_menu_kb() -> ReplyKeyboardMarkup:
-    """Главное меню бота — шесть кнопок, каждая на отдельной строке."""
+    """Главное меню бота — пять кнопок, каждая на отдельной строке."""
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("Получить доступ"))
     kb.add(KeyboardButton("Инструкция"))
     kb.add(KeyboardButton("Личный кабинет"))
-    kb.add(KeyboardButton("Рефералы"))
     kb.add(KeyboardButton("Правила"))
     kb.add(KeyboardButton("Поддержка"))
     return kb
@@ -94,12 +93,18 @@ def instruction_kb() -> InlineKeyboardMarkup:
 
 
 def quick_connect_kb(sub_url: str) -> InlineKeyboardMarkup:
-    """Кнопки после выдачи конфига: быстрое подключение + поддержка."""
+    """Кнопки после выдачи конфига: быстрое подключение + рефералы + поддержка."""
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
         InlineKeyboardButton(
             text="⚡ Быстрое подключение",
             url=sub_url,
+        )
+    )
+    kb.add(
+        InlineKeyboardButton(
+            text="👥 Рефералы",
+            callback_data="referrals",
         )
     )
     kb.add(
@@ -112,8 +117,14 @@ def quick_connect_kb(sub_url: str) -> InlineKeyboardMarkup:
 
 
 def cabinet_kb() -> InlineKeyboardMarkup:
-    """Клавиатура личного кабинета (продление подписки)."""
+    """Клавиатура личного кабинета (продление подписки + рефералы)."""
     kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        InlineKeyboardButton(
+            text="👥 Рефералы",
+            callback_data="referrals",
+        )
+    )
     kb.add(
         InlineKeyboardButton(
             text="Продлить подписку",

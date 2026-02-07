@@ -225,10 +225,10 @@ async def handle_support(message: types.Message) -> None:
     )
 
 
-@dp.message_handler(Text(equals="Рефералы"))
-async def handle_referrals(message: types.Message) -> None:
-    """Показать реферальную ссылку и статистику."""
-    user_id = message.from_user.id
+@dp.callback_query_handler(lambda c: c.data == "referrals")
+async def cb_referrals(callback: types.CallbackQuery) -> None:
+    """Показать реферальную ссылку и статистику (callback из личного кабинета)."""
+    user_id = callback.from_user.id
     bot_info = await bot.get_me()
     ref_link = f"https://t.me/{bot_info.username}?start=ref_{user_id}"
 
@@ -245,7 +245,8 @@ async def handle_referrals(message: types.Message) -> None:
         f"• Активировали подписку: <b>{stats['activated']}</b>\n"
         f"• Заработано дней: <b>{stats['bonus_days']}</b>"
     )
-    await message.answer(text)
+    await callback.message.answer(text)
+    await callback.answer()
 
 
 @dp.message_handler(Text(equals="Правила"))
