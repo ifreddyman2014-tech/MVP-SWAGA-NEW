@@ -324,28 +324,40 @@ async def cmd_capacity(message: types.Message) -> None:
         await message.answer("⛔ Эта команда доступна только администраторам.")
         return
 
+    # Проверяем аргумент --speedtest
+    args = message.get_args()
+    run_speedtest = "speedtest" in args.lower() if args else False
+
     from capacity import get_cpu_cores, get_ram_gb, get_bandwidth_mbps, calculate_capacity
 
     cpu = get_cpu_cores()
     ram = get_ram_gb()
-    bandwidth = get_bandwidth_mbps()
-    cap = calculate_capacity(cpu, ram, bandwidth)
+
+    if run_speedtest:
+        await message.answer("⏳ Запуск теста скорости (30-60 сек)...")
+
+    download, upload, is_real = get_bandwidth_mbps(run_speedtest)
+    cap = calculate_capacity(cpu, ram, download, upload)
+
+    test_label = "реальный тест ✅" if is_real else "оценка"
 
     text = (
         "📊 <b>Вместимость сервера SWAGA VPN</b>\n\n"
         f"<b>Характеристики:</b>\n"
         f"• CPU: {cpu} ядер\n"
         f"• RAM: {ram} GB\n"
-        f"• Bandwidth: ~{bandwidth} Mbps\n\n"
-        f"<b>Лимиты:</b>\n"
-        f"• По CPU: {cap['limits']['CPU']} подкл.\n"
-        f"• По RAM: {cap['limits']['RAM']} подкл.\n"
-        f"• По Bandwidth: {cap['limits']['Bandwidth']} подкл.\n\n"
+        f"• Download: {download} Mbps\n"
+        f"• Upload: {upload} Mbps\n"
+        f"• <i>({test_label})</i>\n\n"
+        f"<b>Лимиты (одновременно):</b>\n"
+        f"• По CPU: {cap['limits']['CPU']}\n"
+        f"• По RAM: {cap['limits']['RAM']}\n"
+        f"• По Upload: {cap['limits']['Bandwidth']}\n\n"
         f"<b>Рекомендации:</b>\n"
         f"👥 Макс. одновременно: <b>{cap['max_concurrent']}</b>\n"
         f"👤 Макс. всего польз.: <b>{cap['max_total']}</b>\n\n"
         f"⚠️ Ограничивающий фактор: <b>{cap['limiting_factor']}</b>\n\n"
-        f"<i>Расчёт: 5 Mbps/польз., 30% онлайн</i>"
+        f"<i>💡 /capacity speedtest — реальный тест</i>"
     )
     await message.answer(text)
 
