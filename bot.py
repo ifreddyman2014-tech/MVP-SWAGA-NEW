@@ -50,6 +50,7 @@ from keyboards import (
     instruction_kb,
     quick_connect_kb,
     cabinet_kb,
+    servers_kb,
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -519,7 +520,7 @@ async def cb_get_access(callback: types.CallbackQuery) -> None:
 
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("plan_"))
 async def cb_plan_selected(callback: types.CallbackQuery) -> None:
-    """Обработка выбора тарифного плана."""
+    """Обработка выбора тарифного плана — показать выбор сервера."""
     user_id = callback.from_user.id
     plan_key = callback.data.replace("plan_", "")  # trial, 1m, 3m, 1y
 
@@ -535,11 +536,80 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
         user = await get_user(user_id)
 
     # ── Пробный период ────────────────────────────────────────────────────
+    if plan_key == "trial" and user["trial_used"]:
+        await callback.answer(
+            "⚠️ Пробный период уже использован.", show_alert=True,
+        )
+        return
+
+    # ── Показать выбор сервера ────────────────────────────────────────────
+    from servers import server_manager
+
+    if not server_manager.servers:
+        server_manager.load_config()
+
+    servers = server_manager.get_healthy_servers()
+
+    if not servers:
+        # Если нет серверов — используем текущий сервер (fallback)
+        await callback.answer()
+        await _create_subscription_on_server(callback, plan_key, None)
+        return
+
+    if len(servers) == 1:
+        # Если только один сервер — сразу создаём подписку
+        await callback.answer()
+        await _create_subscription_on_server(callback, plan_key, servers[0].id)
+        return
+
+    # Показываем выбор сервера
+    await callback.message.answer(
+        f"🌍 <b>Выберите сервер</b>\n\n"
+        f"Тариф: <b>{plan['name']}</b>\n\n"
+        "Выберите локацию для подключения:",
+        reply_markup=servers_kb(servers, plan_key),
+    )
+    await callback.answer()
+
+
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith("server_"))
+async def cb_server_selected(callback: types.CallbackQuery) -> None:
+    """Обработка выбора сервера — создание подписки."""
+    # Формат: server_{server_id}_{plan_key} или server_auto_{plan_key}
+    parts = callback.data.split("_")
+    if len(parts) < 3:
+        await callback.answer("❌ Ошибка выбора сервера", show_alert=True)
+        return
+
+    server_id = parts[1]  # server_id или "auto"
+    plan_key = "_".join(parts[2:])  # plan_key (может содержать _)
+
+    if server_id == "auto":
+        server_id = None  # Автовыбор
+
+    await callback.answer()
+    await _create_subscription_on_server(callback, plan_key, server_id)
+
+
+async def _create_subscription_on_server(
+    callback: types.CallbackQuery,
+    plan_key: str,
+    server_id: str | None,
+) -> None:
+    """Создать подписку на выбранном сервере."""
+    user_id = callback.from_user.id
+    plan = PLANS.get(plan_key)
+
+    if not plan:
+        await callback.message.answer("❌ Неизвестный тарифный план.")
+        return
+
+    user = await get_user(user_id)
+
+    # ── Пробный период ────────────────────────────────────────────────────
     if plan_key == "trial":
-        if user["trial_used"]:
-            await callback.answer(
-                "⚠️ Пробный период уже использован.", show_alert=True,
-            )
+        if user and user["trial_used"]:
+            await callback.message.answer("⚠️ Пробный период уже использован.")
             return
         await mark_trial_used(user_id)
 
@@ -550,19 +620,53 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
             await callback.message.answer(
                 "❌ Ошибка при обработке платежа. Попробуйте позже."
             )
-            await callback.answer()
             return
+
+    # ── Выбор сервера ─────────────────────────────────────────────────────
+    from servers import server_manager
+
+    if not server_manager.servers:
+        server_manager.load_config()
+
+    if server_id:
+        server = server_manager.get_server(server_id)
+    else:
+        server = server_manager.get_best_server()
+
+    # Если нет серверов в мультисервере — используем текущий из .env
+    use_default = server is None
 
     # ── Создание VPN-клиента ──────────────────────────────────────────────
     new_uuid = generate_uuid()
     sub_id = generate_sub_id()
     now = datetime.utcnow()
-    # Уникальный email с timestamp чтобы избежать Duplicate email
     email = f"tg_{user_id}_{int(now.timestamp())}"
     end = now + timedelta(days=plan["days"])
 
     try:
-        success = xui.add_client(INBOUND_ID, new_uuid, email, sub_id=sub_id)
+        if use_default:
+            # Используем дефолтный xui из .env
+            success = xui.add_client(INBOUND_ID, new_uuid, email, sub_id=sub_id)
+            vpn_host = VPN_HOST
+            vpn_port = VPN_PORT
+            actual_server_id = "default"
+        else:
+            # Используем выбранный сервер
+            from xui_api import XUIAPI
+            server_xui = XUIAPI()
+            server_xui.base_url = f"http://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+            server_xui.session.post(
+                f"{server_xui.base_url}/login",
+                json={"username": server.xui_username, "password": server.xui_password},
+                verify=False,
+                timeout=10,
+            )
+            success = server_xui.add_client(server.inbound_id, new_uuid, email, sub_id=sub_id)
+            vpn_host = server.host
+            vpn_port = server.vpn_port
+            actual_server_id = server.id
+            server.current_users += 1
+
         if not success:
             raise RuntimeError("3X-UI add_client вернул False")
     except Exception as e:
@@ -571,11 +675,9 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
         await callback.message.answer(
             "❌ Не удалось создать VPN-конфиг. Обратитесь в поддержку."
         )
-        await callback.answer()
         return
 
     # ── Сохранение подписки в БД ──────────────────────────────────────────
-    # Деактивируем старые подписки перед созданием новой
     await deactivate_user_subs(user_id)
     await create_subscription(
         user_id=user_id,
@@ -584,13 +686,13 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
         end_date=end.isoformat(),
         vless_uuid=new_uuid,
         xui_sub_id=sub_id,
+        server_id=actual_server_id,
     )
 
     # ── Реферальный бонус ─────────────────────────────────────────────────
     referral_bonus_text = ""
     referrer_id = await process_referral_bonus(user_id)
     if referrer_id:
-        # Продлеваем подписку рефереру
         referrer_extended = await extend_subscription(referrer_id, REFERRAL_BONUS_DAYS)
         if referrer_extended:
             try:
@@ -603,16 +705,15 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
                 )
             except Exception as e:
                 logger.warning("Не удалось уведомить реферера %s: %s", referrer_id, e)
-        # Продлеваем подписку приглашённому
         await extend_subscription(user_id, REFERRAL_BONUS_DAYS)
         referral_bonus_text = f"\n🎁 <b>Реферальный бонус:</b> +{REFERRAL_BONUS_DAYS} дней!"
-        end = end + timedelta(days=REFERRAL_BONUS_DAYS)  # Обновляем дату для отображения
+        end = end + timedelta(days=REFERRAL_BONUS_DAYS)
 
     # ── Формирование ответа ───────────────────────────────────────────────
     vless_link = build_vless_link(
         uuid_str=new_uuid,
-        host=VPN_HOST,
-        port=VPN_PORT,
+        host=vpn_host,
+        port=vpn_port,
         transport=VPN_TRANSPORT,
         path=VPN_PATH,
         camouflage_host=VPN_CAMOUFLAGE_HOST,
@@ -624,19 +725,24 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
         reality_spx=REALITY_SPIDERX,
     )
 
+    # Добавляем информацию о сервере
+    server_info = ""
+    if not use_default and server:
+        server_info = f"\n🌍 Сервер: <b>{server.name}</b>"
+
     connect_base = SUB_BASE_URL.replace("/sub/", "/connect/")
     sub_url = f"{connect_base}{sub_id}"
     text = (
         "✅ <b>Подписка активирована!</b>\n\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
         f"📅 Действует до: <b>{format_date(end)}</b>"
+        f"{server_info}"
         f"{referral_bonus_text}\n\n"
         f"🔑 <b>Ваш конфиг (нажмите чтобы скопировать):</b>\n"
         f"<code>{vless_link}</code>\n\n"
         "📲 Нажмите на кнопку ниже для быстрого подключения."
     )
     await callback.message.answer(text, reply_markup=quick_connect_kb(sub_url))
-    await callback.answer()
 
     # ── Уведомление админам о новой подписке ───────────────────────────────
     username = callback.from_user.username
@@ -646,7 +752,8 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
         f"👤 Пользователь: {user_link}\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
         f"💵 Сумма: <b>{plan['price']} ₽</b>\n"
-        f"📅 До: <b>{format_date(end)}</b>"
+        f"📅 До: <b>{format_date(end)}</b>\n"
+        f"🌍 Сервер: <b>{actual_server_id}</b>"
     )
 
 

@@ -132,3 +132,57 @@ def cabinet_kb() -> InlineKeyboardMarkup:
         )
     )
     return kb
+
+
+def servers_kb(servers: list, plan_key: str) -> InlineKeyboardMarkup:
+    """
+    Клавиатура выбора сервера.
+    servers: список объектов VPNServer
+    plan_key: ключ тарифа для callback_data
+    """
+    kb = InlineKeyboardMarkup(row_width=1)
+
+    # Флаги стран
+    flags = {
+        "DE": "🇩🇪",
+        "NL": "🇳🇱",
+        "US": "🇺🇸",
+        "FI": "🇫🇮",
+        "FR": "🇫🇷",
+        "GB": "🇬🇧",
+        "RU": "🇷🇺",
+        "KZ": "🇰🇿",
+    }
+
+    for srv in servers:
+        if not srv.enabled or not srv.is_healthy:
+            continue
+
+        flag = flags.get(srv.location, "🌐")
+        load = int(srv.current_users / max(srv.max_users, 1) * 100)
+
+        # Индикатор загрузки
+        if load < 50:
+            load_icon = "🟢"
+        elif load < 80:
+            load_icon = "🟡"
+        else:
+            load_icon = "🔴"
+
+        kb.add(
+            InlineKeyboardButton(
+                text=f"{flag} {srv.name} {load_icon}",
+                callback_data=f"server_{srv.id}_{plan_key}",
+            )
+        )
+
+    # Кнопка "Автовыбор" — система сама выберет лучший сервер
+    kb.add(
+        InlineKeyboardButton(
+            text="⚡ Автовыбор (рекомендуется)",
+            callback_data=f"server_auto_{plan_key}",
+        )
+    )
+
+    return kb
+
