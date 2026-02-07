@@ -362,6 +362,145 @@ async def cmd_capacity(message: types.Message) -> None:
     await message.answer(text)
 
 
+@dp.message_handler(commands=["servers"])
+async def cmd_servers(message: types.Message) -> None:
+    """Показать статус серверов (только для админов)."""
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("⛔ Эта команда доступна только администраторам.")
+        return
+
+    from servers import server_manager
+
+    # Загружаем конфигурацию если ещё не загружена
+    if not server_manager.servers:
+        server_manager.load_config()
+
+    servers = server_manager.get_all_servers()
+    if not servers:
+        await message.answer(
+            "📡 <b>Серверы не настроены</b>\n\n"
+            "Добавьте серверы в <code>servers.json</code>"
+        )
+        return
+
+    # Проверяем здоровье серверов
+    await message.answer("🔄 Проверка серверов...")
+    await server_manager.check_all_servers()
+
+    stats = server_manager.get_stats()
+
+    text = "📡 <b>Статус серверов SWAGA VPN</b>\n\n"
+
+    for srv in servers:
+        status = "🟢" if srv.is_healthy else "🔴"
+        enabled = "✓" if srv.enabled else "✗"
+        text += (
+            f"{status} <b>{srv.name}</b> [{enabled}]\n"
+            f"   📍 {srv.location} | {srv.host}:{srv.vpn_port}\n"
+            f"   👥 {srv.current_users}/{srv.max_users} пользователей\n"
+        )
+        if srv.last_error:
+            text += f"   ⚠️ {srv.last_error[:50]}\n"
+        text += "\n"
+
+    text += (
+        f"<b>Общая статистика:</b>\n"
+        f"• Серверов: {stats['healthy_servers']}/{stats['total_servers']} онлайн\n"
+        f"• Пользователей: {stats['total_users']}/{stats['total_capacity']}\n"
+        f"• Загрузка: {stats['load_percent']}%"
+    )
+
+    await message.answer(text)
+
+
+@dp.message_handler(commands=["server_add"])
+async def cmd_server_add(message: types.Message) -> None:
+    """
+    Добавить сервер (только для админов).
+    Формат: /server_add id name host xui_host:port username password
+    """
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("⛔ Эта команда доступна только администраторам.")
+        return
+
+    args = message.get_args()
+    if not args:
+        await message.answer(
+            "📝 <b>Добавление сервера</b>\n\n"
+            "Формат:\n"
+            "<code>/server_add id|name|host|xui_host:port|user|pass|location</code>\n\n"
+            "Пример:\n"
+            "<code>/server_add nl1|Нидерланды|nl.vpn.com|127.0.0.1:2055|admin|pass123|NL</code>"
+        )
+        return
+
+    try:
+        parts = args.split("|")
+        if len(parts) < 6:
+            raise ValueError("Недостаточно параметров")
+
+        srv_id = parts[0].strip()
+        name = parts[1].strip()
+        host = parts[2].strip()
+        xui_parts = parts[3].strip().split(":")
+        xui_host = xui_parts[0]
+        xui_port = int(xui_parts[1]) if len(xui_parts) > 1 else 2055
+        username = parts[4].strip()
+        password = parts[5].strip()
+        location = parts[6].strip() if len(parts) > 6 else ""
+
+        from servers import server_manager, VPNServer
+
+        server = VPNServer(
+            id=srv_id,
+            name=name,
+            host=host,
+            xui_host=xui_host,
+            xui_port=xui_port,
+            xui_web_path="",
+            xui_username=username,
+            xui_password=password,
+            location=location,
+        )
+
+        if server_manager.add_server(server):
+            await message.answer(f"✅ Сервер <b>{name}</b> добавлен!")
+        else:
+            await message.answer(f"❌ Сервер с ID <b>{srv_id}</b> уже существует")
+
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+
+
+@dp.message_handler(commands=["server_toggle"])
+async def cmd_server_toggle(message: types.Message) -> None:
+    """Включить/выключить сервер. Формат: /server_toggle server_id"""
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("⛔ Эта команда доступна только администраторам.")
+        return
+
+    args = message.get_args()
+    if not args:
+        await message.answer("Формат: <code>/server_toggle server_id</code>")
+        return
+
+    from servers import server_manager
+
+    server = server_manager.get_server(args.strip())
+    if not server:
+        await message.answer(f"❌ Сервер <b>{args}</b> не найден")
+        return
+
+    server.enabled = not server.enabled
+    server_manager.save_config()
+
+    status = "включён ✅" if server.enabled else "выключен ❌"
+    await message.answer(f"Сервер <b>{server.name}</b> {status}")
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  CALLBACKS
 # ══════════════════════════════════════════════════════════════════════════════
