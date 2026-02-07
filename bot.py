@@ -453,6 +453,17 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
     await callback.message.answer(text, reply_markup=quick_connect_kb(sub_url))
     await callback.answer()
 
+    # ── Уведомление админам о новой подписке ───────────────────────────────
+    username = callback.from_user.username
+    user_link = f"@{username}" if username else f"ID: {user_id}"
+    await notify_admins(
+        f"💰 <b>Новая подписка!</b>\n\n"
+        f"👤 Пользователь: {user_link}\n"
+        f"📦 Тариф: <b>{plan['name']}</b>\n"
+        f"💵 Сумма: <b>{plan['price']} ₽</b>\n"
+        f"📅 До: <b>{format_date(end)}</b>"
+    )
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  SCHEDULER (asyncio tasks)
