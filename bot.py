@@ -316,6 +316,40 @@ async def cmd_reset_me(message: types.Message) -> None:
     )
 
 
+@dp.message_handler(commands=["capacity"])
+async def cmd_capacity(message: types.Message) -> None:
+    """Показать вместимость сервера (только для админов)."""
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("⛔ Эта команда доступна только администраторам.")
+        return
+
+    from capacity import get_cpu_cores, get_ram_gb, get_bandwidth_mbps, calculate_capacity
+
+    cpu = get_cpu_cores()
+    ram = get_ram_gb()
+    bandwidth = get_bandwidth_mbps()
+    cap = calculate_capacity(cpu, ram, bandwidth)
+
+    text = (
+        "📊 <b>Вместимость сервера SWAGA VPN</b>\n\n"
+        f"<b>Характеристики:</b>\n"
+        f"• CPU: {cpu} ядер\n"
+        f"• RAM: {ram} GB\n"
+        f"• Bandwidth: ~{bandwidth} Mbps\n\n"
+        f"<b>Лимиты:</b>\n"
+        f"• По CPU: {cap['limits']['CPU']} подкл.\n"
+        f"• По RAM: {cap['limits']['RAM']} подкл.\n"
+        f"• По Bandwidth: {cap['limits']['Bandwidth']} подкл.\n\n"
+        f"<b>Рекомендации:</b>\n"
+        f"👥 Макс. одновременно: <b>{cap['max_concurrent']}</b>\n"
+        f"👤 Макс. всего польз.: <b>{cap['max_total']}</b>\n\n"
+        f"⚠️ Ограничивающий фактор: <b>{cap['limiting_factor']}</b>\n\n"
+        f"<i>Расчёт: 5 Mbps/польз., 30% онлайн</i>"
+    )
+    await message.answer(text)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  CALLBACKS
 # ══════════════════════════════════════════════════════════════════════════════
