@@ -364,8 +364,9 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
     # ── Создание VPN-клиента ──────────────────────────────────────────────
     new_uuid = generate_uuid()
     sub_id = generate_sub_id()
-    email = f"tg_{user_id}_{plan_key}"
     now = datetime.utcnow()
+    # Уникальный email с timestamp чтобы избежать Duplicate email
+    email = f"tg_{user_id}_{int(now.timestamp())}"
     end = now + timedelta(days=plan["days"])
 
     try:
