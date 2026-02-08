@@ -769,6 +769,17 @@ async def _create_subscription_on_server(
     if actual_server_id and actual_server_id != "default":
         srv = server_manager.get_server(actual_server_id)
 
+    # Формируем название конфига с локацией
+    location_names = {
+        "DE": "Germany", "NL": "Netherlands", "US": "USA", "FI": "Finland",
+        "FR": "France", "GB": "UK", "LV": "Latvia", "RU": "Russia", "KZ": "Kazakhstan",
+    }
+    if srv:
+        loc_name = location_names.get(srv.location, srv.location or "")
+        remark = f"SWAGA {loc_name}".strip() if loc_name else "SWAGA VPN"
+    else:
+        remark = "SWAGA VPN"
+
     # Используем настройки сервера или глобальные из .env
     if srv and srv.reality_pbk:
         vless_link = build_vless_link(
@@ -784,6 +795,7 @@ async def _create_subscription_on_server(
             reality_fp=srv.reality_fp or REALITY_FINGERPRINT,
             reality_sni=srv.reality_sni,
             reality_spx=REALITY_SPIDERX,
+            remark=remark,
         )
     else:
         vless_link = build_vless_link(
@@ -799,6 +811,7 @@ async def _create_subscription_on_server(
             reality_fp=REALITY_FINGERPRINT,
             reality_sni=REALITY_SNI,
             reality_spx=REALITY_SPIDERX,
+            remark=remark,
         )
 
     # Добавляем информацию о сервере
