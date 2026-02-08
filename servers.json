@@ -2,7 +2,7 @@
   "servers": [
     {
       "id": "de1",
-      "name": "Германия 1 (основной)",
+      "name": "Германия (основной)",
       "host": "swaga-vpn.ru",
       "xui_host": "127.0.0.1",
       "xui_port": 2055,
@@ -14,7 +14,39 @@
       "max_users": 150,
       "priority": 10,
       "enabled": true,
-      "location": "DE"
+      "location": "DE",
+      "transport": "",
+      "transport_path": "",
+      "transport_host": "",
+      "xhttp_mode": "",
+      "reality_pbk": "",
+      "reality_sid": "",
+      "reality_sni": "",
+      "reality_fp": ""
+    },
+    {
+      "id": "lv1",
+      "name": "Латвия",
+      "host": "155.212.225.26",
+      "xui_host": "155.212.225.26",
+      "xui_port": 2053,
+      "xui_web_path": "/",
+      "xui_username": "073PdBjAO-",
+      "xui_password": "U_xsnb72bo",
+      "vpn_port": 443,
+      "inbound_id": 1,
+      "max_users": 100,
+      "priority": 5,
+      "enabled": true,
+      "location": "LV",
+      "transport": "xhttp",
+      "transport_path": "/adv",
+      "transport_host": "yandex.ru",
+      "xhttp_mode": "packet-up",
+      "reality_pbk": "ZCxK16sZZVtCYQkupVu5DxTVWS_vGg0odga8bk5EkhI",
+      "reality_sid": "4527ed",
+      "reality_sni": "www.focus.lv",
+      "reality_fp": "chrome"
     }
   ]
 }
