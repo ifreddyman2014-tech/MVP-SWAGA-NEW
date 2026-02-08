@@ -694,7 +694,14 @@ async def _create_subscription_on_server(
                 # Используем выбранный сервер
                 from xui_api import XUIAPI
                 server_xui = XUIAPI()
-                server_xui.base_url = f"http://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+                # Определяем протокол: HTTPS для внешних серверов или SSL-портов
+                if server.xui_host not in ("127.0.0.1", "localhost"):
+                    protocol = "https"
+                elif server.xui_port in (443, 2053, 2096):
+                    protocol = "https"
+                else:
+                    protocol = "http"
+                server_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
                 server_xui.session.post(
                     f"{server_xui.base_url}/login",
                     json={"username": server.xui_username, "password": server.xui_password},
