@@ -1004,7 +1004,7 @@ async def _create_subscription_on_server(
                     server_xui = XUIAPI()
                     if server.xui_host not in ("127.0.0.1", "localhost"):
                         protocol = "https"
-                    elif server.xui_port in (443, 2053, 2096):
+                    elif server.xui_port in (443, 2053, 2083, 2096, 8443):
                         protocol = "https"
                     else:
                         protocol = "http"
@@ -1083,7 +1083,7 @@ async def _create_subscription_on_server(
                 # Определяем протокол: HTTPS для внешних серверов или SSL-портов
                 if server.xui_host not in ("127.0.0.1", "localhost"):
                     protocol = "https"
-                elif server.xui_port in (443, 2053, 2096):
+                elif server.xui_port in (443, 2053, 2083, 2096, 8443):
                     protocol = "https"
                 else:
                     protocol = "http"
@@ -1424,7 +1424,7 @@ async def _migrate_user_to_server(sub: dict, new_server) -> bool:
         server_xui = XUIAPI()
         if new_server.xui_host not in ("127.0.0.1", "localhost"):
             protocol = "https"
-        elif new_server.xui_port in (443, 2053, 2096):
+        elif new_server.xui_port in (443, 2053, 2083, 2096, 8443):
             protocol = "https"
         else:
             protocol = "http"
@@ -1519,7 +1519,7 @@ async def _cleanup_old_clients(server) -> int:
     # Определяем протокол
     if server.xui_host not in ("127.0.0.1", "localhost"):
         protocol = "https"
-    elif server.xui_port in (443, 2053, 2096):
+    elif server.xui_port in (443, 2053, 2083, 2096, 8443):
         protocol = "https"
     else:
         protocol = "http"
@@ -1737,7 +1737,7 @@ async def handle_payment_success(
                     server_xui = XUIAPI()
                     if server.xui_host not in ("127.0.0.1", "localhost"):
                         protocol = "https"
-                    elif server.xui_port in (443, 2053, 2096):
+                    elif server.xui_port in (443, 2053, 2083, 2096, 8443):
                         protocol = "https"
                     else:
                         protocol = "http"
@@ -1807,7 +1807,7 @@ async def handle_payment_success(
                 server_xui = XUIAPI()
                 if server.xui_host not in ("127.0.0.1", "localhost"):
                     protocol = "https"
-                elif server.xui_port in (443, 2053, 2096):
+                elif server.xui_port in (443, 2053, 2083, 2096, 8443):
                     protocol = "https"
                 else:
                     protocol = "http"
