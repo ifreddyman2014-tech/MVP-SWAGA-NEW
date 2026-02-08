@@ -750,27 +750,47 @@ async def _create_subscription_on_server(
         end = end + timedelta(days=REFERRAL_BONUS_DAYS)
 
     # ── Формирование ответа ───────────────────────────────────────────────
-    vless_link = build_vless_link(
-        uuid_str=new_uuid,
-        host=vpn_host,
-        port=vpn_port,
-        transport=VPN_TRANSPORT,
-        path=VPN_PATH,
-        camouflage_host=VPN_CAMOUFLAGE_HOST,
-        xhttp_mode=VPN_XHTTP_MODE,
-        reality_pbk=REALITY_PUBLIC_KEY,
-        reality_sid=REALITY_SHORT_ID,
-        reality_fp=REALITY_FINGERPRINT,
-        reality_sni=REALITY_SNI,
-        reality_spx=REALITY_SPIDERX,
-    )
+    # Получаем настройки сервера для VLESS ссылки
+    srv = None
+    if actual_server_id and actual_server_id != "default":
+        srv = server_manager.get_server(actual_server_id)
+
+    # Используем настройки сервера или глобальные из .env
+    if srv and srv.reality_pbk:
+        vless_link = build_vless_link(
+            uuid_str=new_uuid,
+            host=vpn_host,
+            port=vpn_port,
+            transport=srv.transport or VPN_TRANSPORT,
+            path=srv.transport_path or VPN_PATH,
+            camouflage_host=srv.transport_host or VPN_CAMOUFLAGE_HOST,
+            xhttp_mode=srv.xhttp_mode or VPN_XHTTP_MODE,
+            reality_pbk=srv.reality_pbk,
+            reality_sid=srv.reality_sid,
+            reality_fp=srv.reality_fp or REALITY_FINGERPRINT,
+            reality_sni=srv.reality_sni,
+            reality_spx=REALITY_SPIDERX,
+        )
+    else:
+        vless_link = build_vless_link(
+            uuid_str=new_uuid,
+            host=vpn_host,
+            port=vpn_port,
+            transport=VPN_TRANSPORT,
+            path=VPN_PATH,
+            camouflage_host=VPN_CAMOUFLAGE_HOST,
+            xhttp_mode=VPN_XHTTP_MODE,
+            reality_pbk=REALITY_PUBLIC_KEY,
+            reality_sid=REALITY_SHORT_ID,
+            reality_fp=REALITY_FINGERPRINT,
+            reality_sni=REALITY_SNI,
+            reality_spx=REALITY_SPIDERX,
+        )
 
     # Добавляем информацию о сервере
     server_info = ""
-    if actual_server_id and actual_server_id != "default":
-        srv = server_manager.get_server(actual_server_id)
-        if srv:
-            server_info = f"\n🌍 Сервер: <b>{srv.name}</b>"
+    if srv:
+        server_info = f"\n🌍 Сервер: <b>{srv.name}</b>"
 
     connect_base = SUB_BASE_URL.replace("/sub/", "/connect/")
     sub_url = f"{connect_base}{sub_id}"

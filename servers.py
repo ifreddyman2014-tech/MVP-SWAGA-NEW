@@ -37,6 +37,18 @@ class VPNServer:
     enabled: bool = True             # Включён ли сервер
     location: str = ""               # Геолокация (DE, NL, US...)
 
+    # VPN transport настройки
+    transport: str = "xhttp"         # Транспорт (tcp, xhttp, ws...)
+    transport_path: str = ""         # Путь для xhttp/ws
+    transport_host: str = ""         # Host header
+    xhttp_mode: str = "packet-up"    # Режим xhttp
+
+    # Reality настройки
+    reality_pbk: str = ""            # Public Key
+    reality_sid: str = ""            # Short ID
+    reality_sni: str = ""            # SNI (домен маскировки)
+    reality_fp: str = "chrome"       # Fingerprint
+
     # Runtime состояние
     is_healthy: bool = True
     current_users: int = 0
@@ -93,6 +105,14 @@ class ServerManager:
                         "priority": s.priority,
                         "enabled": s.enabled,
                         "location": s.location,
+                        "transport": s.transport,
+                        "transport_path": s.transport_path,
+                        "transport_host": s.transport_host,
+                        "xhttp_mode": s.xhttp_mode,
+                        "reality_pbk": s.reality_pbk,
+                        "reality_sid": s.reality_sid,
+                        "reality_sni": s.reality_sni,
+                        "reality_fp": s.reality_fp,
                     }
                     for s in self.servers.values()
                 ]
