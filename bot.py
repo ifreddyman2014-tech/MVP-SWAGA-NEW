@@ -50,6 +50,8 @@ from database import (
     set_user_discount_promo,
     get_user_discount,
     clear_user_discount,
+    get_subs_by_server,
+    update_sub_server,
 )
 from xui_api import XUIAPI
 from yookassa_payment import create_payment as yookassa_create_payment
@@ -1397,6 +1399,182 @@ async def _scheduler_backup() -> None:
             await notify_admins("⚠️ Ошибка при создании бэкапа! Проверьте логи.")
 
 
+async def _migrate_user_to_server(sub: dict, new_server) -> bool:
+    """
+    Мигрировать пользователя на новый сервер.
+    Создаёт нового клиента на новом сервере и обновляет подписку.
+    """
+    try:
+        user_id = sub["user_id"]
+        old_uuid = sub["vless_uuid"]
+        end_date = datetime.fromisoformat(sub["end_date"])
+        expiry_ms = int(end_date.timestamp() * 1000)
+
+        # Генерируем новые данные
+        new_uuid = generate_uuid()
+        new_sub_id = generate_sub_id()
+        new_email = f"tg_{user_id}_{int(datetime.utcnow().timestamp())}"
+
+        # Создаём клиента на новом сервере
+        from xui_api import XUIAPI
+        server_xui = XUIAPI()
+        if new_server.xui_host not in ("127.0.0.1", "localhost"):
+            protocol = "https"
+        elif new_server.xui_port in (443, 2053, 2096):
+            protocol = "https"
+        else:
+            protocol = "http"
+        server_xui.base_url = f"{protocol}://{new_server.xui_host}:{new_server.xui_port}{new_server.xui_web_path}"
+
+        login_resp = server_xui.session.post(
+            f"{server_xui.base_url}/login",
+            json={"username": new_server.xui_username, "password": new_server.xui_password},
+            verify=False, timeout=10,
+        )
+        if not login_resp.json().get("success"):
+            logger.error("Не удалось авторизоваться на сервере %s", new_server.name)
+            return False
+
+        server_xui._logged_in = True
+        success = server_xui.add_client(
+            new_server.inbound_id, new_uuid, new_email,
+            sub_id=new_sub_id, expiry_time=expiry_ms
+        )
+
+        if not success:
+            logger.error("Не удалось создать клиента на сервере %s", new_server.name)
+            return False
+
+        # Обновляем подписку в БД
+        await update_sub_server(sub["sub_id"], new_server.id, new_uuid, new_email, new_sub_id)
+
+        # Формируем новую ссылку
+        vless_link = build_vless_link(
+            uuid_str=new_uuid,
+            host=new_server.host,
+            port=new_server.vpn_port,
+            transport=new_server.transport or VPN_TRANSPORT,
+            path=new_server.transport_path or VPN_PATH,
+            camouflage_host=new_server.transport_host or VPN_CAMOUFLAGE_HOST,
+            xhttp_mode=new_server.xhttp_mode or VPN_XHTTP_MODE,
+            reality_pbk=new_server.reality_pbk,
+            reality_sid=new_server.reality_sid,
+            reality_fp=new_server.reality_fp or REALITY_FINGERPRINT,
+            reality_sni=new_server.reality_sni,
+            reality_spx=REALITY_SPIDERX,
+        )
+
+        # Уведомляем пользователя
+        sub_url = f"{SUB_BASE_URL}{new_sub_id}"
+        try:
+            await bot.send_message(
+                user_id,
+                f"🔄 <b>Автопереключение сервера</b>\n\n"
+                f"Ваш предыдущий сервер временно недоступен.\n"
+                f"Вы переключены на: <b>{new_server.name}</b>\n\n"
+                f"🔑 Новый конфиг:\n<code>{vless_link}</code>\n\n"
+                f"📲 Или используйте быстрое подключение:",
+                parse_mode="HTML",
+                reply_markup=quick_connect_kb(sub_url),
+            )
+        except Exception as e:
+            logger.warning("Не удалось уведомить user=%s о failover: %s", user_id, e)
+
+        logger.info("Пользователь %s мигрирован на сервер %s", user_id, new_server.name)
+        return True
+
+    except Exception as e:
+        logger.error("Ошибка миграции пользователя %s: %s", sub.get("user_id"), e)
+        return False
+
+
+async def _scheduler_server_failover() -> None:
+    """
+    Проверка серверов каждые 2 минуты.
+    При падении сервера — переключение пользователей на здоровый.
+    """
+    await asyncio.sleep(120)  # Ждём 2 минуты при старте
+
+    # Отслеживаем количество последовательных ошибок для каждого сервера
+    server_fail_count: dict[str, int] = {}
+    FAIL_THRESHOLD = 3  # Сколько ошибок подряд = сервер упал
+
+    while True:
+        try:
+            from servers import server_manager
+            if not server_manager.servers:
+                server_manager.load_config()
+
+            # Проверяем все серверы
+            health_results = await server_manager.check_all_servers()
+
+            for server_id, is_healthy in health_results.items():
+                server = server_manager.get_server(server_id)
+                if not server or not server.enabled:
+                    continue
+
+                if is_healthy:
+                    # Сбрасываем счётчик ошибок
+                    server_fail_count[server_id] = 0
+                else:
+                    # Увеличиваем счётчик ошибок
+                    server_fail_count[server_id] = server_fail_count.get(server_id, 0) + 1
+                    fail_count = server_fail_count[server_id]
+
+                    logger.warning(
+                        "Сервер %s недоступен (%d/%d)",
+                        server.name, fail_count, FAIL_THRESHOLD
+                    )
+
+                    # Если порог достигнут — запускаем failover
+                    if fail_count == FAIL_THRESHOLD:
+                        # Находим здоровый сервер для миграции
+                        healthy_servers = [
+                            s for s in server_manager.get_healthy_servers()
+                            if s.id != server_id
+                        ]
+
+                        if not healthy_servers:
+                            await notify_admins(
+                                f"🚨 <b>КРИТИЧНО!</b>\n\n"
+                                f"Сервер <b>{server.name}</b> упал, "
+                                f"но нет доступных серверов для миграции!"
+                            )
+                            continue
+
+                        target_server = healthy_servers[0]
+
+                        # Получаем пользователей упавшего сервера
+                        subs = await get_subs_by_server(server_id)
+                        if not subs:
+                            continue
+
+                        await notify_admins(
+                            f"🔄 <b>Failover запущен</b>\n\n"
+                            f"Сервер <b>{server.name}</b> недоступен.\n"
+                            f"Переключаем {len(subs)} пользователей на <b>{target_server.name}</b>..."
+                        )
+
+                        # Мигрируем пользователей
+                        migrated = 0
+                        for sub in subs:
+                            if await _migrate_user_to_server(sub, target_server):
+                                migrated += 1
+                            await asyncio.sleep(0.5)  # Небольшая задержка
+
+                        await notify_admins(
+                            f"✅ <b>Failover завершён</b>\n\n"
+                            f"Мигрировано: {migrated}/{len(subs)} пользователей\n"
+                            f"Новый сервер: <b>{target_server.name}</b>"
+                        )
+
+        except Exception as e:
+            logger.error("Ошибка в scheduler_failover: %s", e)
+
+        # Проверяем каждые 2 минуты
+        await asyncio.sleep(120)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  YOOKASSA PAYMENT CALLBACK
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1739,7 +1917,8 @@ async def on_startup(_dp: Dispatcher) -> None:
     asyncio.create_task(_scheduler_expiration_check())
     asyncio.create_task(_scheduler_reminders())
     asyncio.create_task(_scheduler_backup())
-    logger.info("Фоновые задачи запущены")
+    asyncio.create_task(_scheduler_server_failover())
+    logger.info("Фоновые задачи запущены (включая failover)")
 
     # Уведомление админам
     now_str = datetime.utcnow().strftime("%d.%m.%Y %H:%M UTC")

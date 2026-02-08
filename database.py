@@ -445,6 +445,32 @@ async def count_users() -> int:
         return row[0] if row else 0
 
 
+async def get_subs_by_server(server_id: str) -> list[dict]:
+    """Получить все активные подписки на конкретном сервере."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT * FROM subscriptions
+               WHERE server_id = ? AND is_active = 1""",
+            (server_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def update_sub_server(sub_id: int, new_server_id: str, new_uuid: str, new_email: str, new_sub_id: str) -> bool:
+    """Обновить сервер для подписки (для failover)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """UPDATE subscriptions
+               SET server_id = ?, vless_uuid = ?, xui_email = ?, xui_sub_id = ?
+               WHERE sub_id = ?""",
+            (new_server_id, new_uuid, new_email, new_sub_id, sub_id),
+        )
+        await db.commit()
+        return True
+
+
 # ── Payments (YooKassa) ───────────────────────────────────────────────────────
 
 async def create_payment(
