@@ -707,19 +707,52 @@ async def _create_subscription_on_server(
         new_uuid = existing_sub["vless_uuid"]
         sub_id = existing_sub.get("xui_sub_id", "")
         actual_server_id = existing_sub.get("server_id", "default")
+        email = existing_sub.get("xui_email", f"tg_{user_id}")
 
         # Определяем хост для ссылки
         from servers import server_manager
         if not server_manager.servers:
             server_manager.load_config()
 
+        # Обновляем expiry в 3X-UI панели
+        new_expiry_ms = int(new_end.timestamp() * 1000)
         if actual_server_id and actual_server_id != "default":
             server = server_manager.get_server(actual_server_id)
             vpn_host = server.host if server else VPN_HOST
             vpn_port = server.vpn_port if server else VPN_PORT
+            # Обновляем на внешнем сервере
+            if server:
+                try:
+                    from xui_api import XUIAPI
+                    server_xui = XUIAPI()
+                    if server.xui_host not in ("127.0.0.1", "localhost"):
+                        protocol = "https"
+                    elif server.xui_port in (443, 2053, 2096):
+                        protocol = "https"
+                    else:
+                        protocol = "http"
+                    server_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+                    login_resp = server_xui.session.post(
+                        f"{server_xui.base_url}/login",
+                        json={"username": server.xui_username, "password": server.xui_password},
+                        verify=False, timeout=10,
+                    )
+                    if login_resp.json().get("success"):
+                        server_xui._logged_in = True
+                        server_xui.update_client(
+                            server.inbound_id, new_uuid, email,
+                            sub_id=sub_id, expiry_time=new_expiry_ms
+                        )
+                except Exception as e:
+                    logger.warning("Не удалось обновить expiry в панели: %s", e)
         else:
             vpn_host = VPN_HOST
             vpn_port = VPN_PORT
+            # Обновляем на дефолтном сервере
+            try:
+                xui.update_client(INBOUND_ID, new_uuid, email, sub_id=sub_id, expiry_time=new_expiry_ms)
+            except Exception as e:
+                logger.warning("Не удалось обновить expiry в панели: %s", e)
 
         end = new_end
         is_extension = True
@@ -810,6 +843,7 @@ async def _create_subscription_on_server(
             vless_uuid=new_uuid,
             xui_sub_id=sub_id,
             server_id=actual_server_id,
+            xui_email=email,
         )
 
     # ── Реферальный бонус ─────────────────────────────────────────────────
@@ -1135,16 +1169,48 @@ async def handle_payment_success(
         new_uuid = existing_sub["vless_uuid"]
         sub_id = existing_sub.get("xui_sub_id", "")
         actual_server_id = existing_sub.get("server_id", "default")
+        email = existing_sub.get("xui_email", f"tg_{user_id}")
 
-        # Определяем хост для ссылки
+        # Обновляем expiry в 3X-UI панели
+        new_expiry_ms = int(end.timestamp() * 1000)
         if actual_server_id and actual_server_id != "default":
             server = server_manager.get_server(actual_server_id)
             vpn_host = server.host if server else VPN_HOST
             vpn_port = server.vpn_port if server else VPN_PORT
+            # Обновляем на внешнем сервере
+            if server:
+                try:
+                    from xui_api import XUIAPI
+                    server_xui = XUIAPI()
+                    if server.xui_host not in ("127.0.0.1", "localhost"):
+                        protocol = "https"
+                    elif server.xui_port in (443, 2053, 2096):
+                        protocol = "https"
+                    else:
+                        protocol = "http"
+                    server_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+                    login_resp = server_xui.session.post(
+                        f"{server_xui.base_url}/login",
+                        json={"username": server.xui_username, "password": server.xui_password},
+                        verify=False, timeout=10,
+                    )
+                    if login_resp.json().get("success"):
+                        server_xui._logged_in = True
+                        server_xui.update_client(
+                            server.inbound_id, new_uuid, email,
+                            sub_id=sub_id, expiry_time=new_expiry_ms
+                        )
+                except Exception as e:
+                    logger.warning("Не удалось обновить expiry в панели: %s", e)
         else:
             server = None
             vpn_host = VPN_HOST
             vpn_port = VPN_PORT
+            # Обновляем на дефолтном сервере
+            try:
+                xui.update_client(INBOUND_ID, new_uuid, email, sub_id=sub_id, expiry_time=new_expiry_ms)
+            except Exception as e:
+                logger.warning("Не удалось обновить expiry в панели: %s", e)
 
         is_extension = True
         logger.info("Extending subscription for user %s to %s", user_id, end)
@@ -1231,6 +1297,7 @@ async def handle_payment_success(
             vless_uuid=new_uuid,
             xui_sub_id=sub_id,
             server_id=actual_server_id,
+            xui_email=email,
         )
 
     # Реферальный бонус

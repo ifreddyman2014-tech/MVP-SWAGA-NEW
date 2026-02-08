@@ -60,6 +60,11 @@ async def init_db() -> None:
             await db.execute("ALTER TABLE subscriptions ADD COLUMN server_id TEXT DEFAULT ''")
         except Exception:
             pass
+        # Миграция: добавить xui_email для обновления клиента в панели
+        try:
+            await db.execute("ALTER TABLE subscriptions ADD COLUMN xui_email TEXT DEFAULT ''")
+        except Exception:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,14 +140,15 @@ async def create_subscription(
     vless_uuid: str,
     xui_sub_id: str = "",
     server_id: str = "",
+    xui_email: str = "",
 ) -> int:
     """Создать подписку и вернуть sub_id."""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """INSERT INTO subscriptions
-               (user_id, plan, start_date, end_date, is_active, vless_uuid, xui_sub_id, server_id)
-               VALUES (?, ?, ?, ?, 1, ?, ?, ?)""",
-            (user_id, plan, start_date, end_date, vless_uuid, xui_sub_id, server_id),
+               (user_id, plan, start_date, end_date, is_active, vless_uuid, xui_sub_id, server_id, xui_email)
+               VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)""",
+            (user_id, plan, start_date, end_date, vless_uuid, xui_sub_id, server_id, xui_email),
         )
         await db.commit()
         return cursor.lastrowid

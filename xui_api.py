@@ -97,6 +97,46 @@ class XUIAPI:
             logger.error("3X-UI: ошибка при добавлении клиента — %s", e)
             return False
 
+    def update_client(
+        self,
+        inbound_id: int,
+        uuid: str,
+        email: str,
+        sub_id: str = "",
+        expiry_time: int = 0,
+    ) -> bool:
+        """
+        Обновить параметры клиента (например, срок действия).
+        """
+        self._ensure_login()
+        url = f"{self.base_url}/panel/api/inbounds/updateClient/{uuid}"
+        settings = json.dumps({
+            "clients": [
+                {
+                    "id": uuid,
+                    "email": email,
+                    "enable": True,
+                    "expiryTime": expiry_time,
+                    "flow": "",
+                    "limitIp": 0,
+                    "totalGB": 0,
+                    "subId": sub_id,
+                }
+            ]
+        })
+        payload = {"id": inbound_id, "settings": settings}
+        try:
+            resp = self.session.post(url, json=payload, verify=False, timeout=10)
+            data = resp.json()
+            if data.get("success"):
+                logger.info("3X-UI: клиент обновлён — %s, expiry=%s", email, expiry_time)
+                return True
+            logger.error("3X-UI: ошибка обновления клиента — %s", data)
+            return False
+        except Exception as e:
+            logger.error("3X-UI: ошибка при обновлении клиента — %s", e)
+            return False
+
     def delete_client(self, inbound_id: int, uuid: str) -> bool:
         """Удалить клиента из inbound по UUID."""
         self._ensure_login()
