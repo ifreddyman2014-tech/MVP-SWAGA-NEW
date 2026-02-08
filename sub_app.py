@@ -21,10 +21,57 @@ from config import (
 )
 from database import get_sub_by_xui_id
 from utils import build_vless_link, format_date
+from servers import server_manager
 
 logger = logging.getLogger(__name__)
 
 routes = web.RouteTableDef()
+
+# Флаги и названия стран
+LOCATION_FLAGS = {
+    "DE": "🇩🇪", "NL": "🇳🇱", "US": "🇺🇸", "FI": "🇫🇮",
+    "FR": "🇫🇷", "GB": "🇬🇧", "LV": "🇱🇻", "RU": "🇷🇺", "KZ": "🇰🇿",
+}
+
+
+def get_server_config(server_id: str) -> dict:
+    """Получить настройки сервера по ID. Возвращает дефолтные если не найден."""
+    if not server_manager.servers:
+        server_manager.load_config()
+
+    srv = server_manager.get_server(server_id) if server_id else None
+
+    if srv and srv.reality_pbk:
+        return {
+            "host": srv.host,
+            "port": srv.vpn_port,
+            "transport": srv.transport or VPN_TRANSPORT,
+            "path": srv.transport_path or VPN_PATH,
+            "camouflage_host": srv.transport_host or VPN_CAMOUFLAGE_HOST,
+            "xhttp_mode": srv.xhttp_mode or VPN_XHTTP_MODE,
+            "reality_pbk": srv.reality_pbk,
+            "reality_sid": srv.reality_sid,
+            "reality_fp": srv.reality_fp or REALITY_FINGERPRINT,
+            "reality_sni": srv.reality_sni,
+            "flag": LOCATION_FLAGS.get(srv.location, "🌐"),
+            "location": srv.location,
+        }
+
+    # Дефолтные настройки из .env
+    return {
+        "host": VPN_HOST,
+        "port": VPN_PORT,
+        "transport": VPN_TRANSPORT,
+        "path": VPN_PATH,
+        "camouflage_host": VPN_CAMOUFLAGE_HOST,
+        "xhttp_mode": VPN_XHTTP_MODE,
+        "reality_pbk": REALITY_PUBLIC_KEY,
+        "reality_sid": REALITY_SHORT_ID,
+        "reality_fp": REALITY_FINGERPRINT,
+        "reality_sni": REALITY_SNI,
+        "flag": "🇩🇪",
+        "location": "DE",
+    }
 
 
 @routes.get("/sub/{sub_id}")
@@ -39,22 +86,27 @@ async def handle_subscription(request: web.Request) -> web.Response:
     if not sub.get("is_active"):
         return web.Response(status=403, text="subscription expired")
 
-    # Формируем название: 🇩🇪 SWAGA VPN - до DD.MM.YYYY
+    # Получаем настройки сервера
+    server_id = sub.get("server_id", "")
+    cfg = get_server_config(server_id)
+
+    # Формируем название: 🇱🇻 SWAGA VPN - до DD.MM.YYYY
     end_date_str = format_date(sub["end_date"]) if sub.get("end_date") else ""
-    remark = f"🇩🇪 SWAGA VPN - до {end_date_str}" if end_date_str else "🇩🇪 SWAGA VPN"
+    flag = cfg["flag"]
+    remark = f"{flag} SWAGA VPN - до {end_date_str}" if end_date_str else f"{flag} SWAGA VPN"
 
     vless_link = build_vless_link(
         uuid_str=sub["vless_uuid"],
-        host=VPN_HOST,
-        port=VPN_PORT,
-        transport=VPN_TRANSPORT,
-        path=VPN_PATH,
-        camouflage_host=VPN_CAMOUFLAGE_HOST,
-        xhttp_mode=VPN_XHTTP_MODE,
-        reality_pbk=REALITY_PUBLIC_KEY,
-        reality_sid=REALITY_SHORT_ID,
-        reality_fp=REALITY_FINGERPRINT,
-        reality_sni=REALITY_SNI,
+        host=cfg["host"],
+        port=cfg["port"],
+        transport=cfg["transport"],
+        path=cfg["path"],
+        camouflage_host=cfg["camouflage_host"],
+        xhttp_mode=cfg["xhttp_mode"],
+        reality_pbk=cfg["reality_pbk"],
+        reality_sid=cfg["reality_sid"],
+        reality_fp=cfg["reality_fp"],
+        reality_sni=cfg["reality_sni"],
         reality_spx=REALITY_SPIDERX,
         remark=remark,
     )
@@ -204,22 +256,27 @@ async def handle_connect(request: web.Request) -> web.Response:
     if not sub.get("is_active"):
         return web.Response(status=403, text="subscription expired")
 
-    # Формируем название: 🇩🇪 SWAGA VPN - до DD.MM.YYYY
+    # Получаем настройки сервера
+    server_id = sub.get("server_id", "")
+    cfg = get_server_config(server_id)
+
+    # Формируем название с флагом страны
     end_date_str = format_date(sub["end_date"]) if sub.get("end_date") else ""
-    remark = f"🇩🇪 SWAGA VPN - до {end_date_str}" if end_date_str else "🇩🇪 SWAGA VPN"
+    flag = cfg["flag"]
+    remark = f"{flag} SWAGA VPN - до {end_date_str}" if end_date_str else f"{flag} SWAGA VPN"
 
     vless_link = build_vless_link(
         uuid_str=sub["vless_uuid"],
-        host=VPN_HOST,
-        port=VPN_PORT,
-        transport=VPN_TRANSPORT,
-        path=VPN_PATH,
-        camouflage_host=VPN_CAMOUFLAGE_HOST,
-        xhttp_mode=VPN_XHTTP_MODE,
-        reality_pbk=REALITY_PUBLIC_KEY,
-        reality_sid=REALITY_SHORT_ID,
-        reality_fp=REALITY_FINGERPRINT,
-        reality_sni=REALITY_SNI,
+        host=cfg["host"],
+        port=cfg["port"],
+        transport=cfg["transport"],
+        path=cfg["path"],
+        camouflage_host=cfg["camouflage_host"],
+        xhttp_mode=cfg["xhttp_mode"],
+        reality_pbk=cfg["reality_pbk"],
+        reality_sid=cfg["reality_sid"],
+        reality_fp=cfg["reality_fp"],
+        reality_sni=cfg["reality_sni"],
         reality_spx=REALITY_SPIDERX,
         remark=remark,
     )
