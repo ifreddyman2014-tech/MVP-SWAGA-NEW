@@ -723,11 +723,15 @@ async def _create_subscription_on_server(
         sub_id = generate_sub_id()
         email = f"tg_{user_id}_{int(now.timestamp())}"
         end = now + timedelta(days=plan["days"])
+        expiry_ms = int(end.timestamp() * 1000)  # 3X-UI использует миллисекунды
 
         try:
             if use_default:
                 # Используем дефолтный xui из .env
-                success = xui.add_client(INBOUND_ID, new_uuid, email, sub_id=sub_id)
+                success = xui.add_client(
+                    INBOUND_ID, new_uuid, email,
+                    sub_id=sub_id, expiry_time=expiry_ms
+                )
                 vpn_host = VPN_HOST
                 vpn_port = VPN_PORT
                 actual_server_id = "default"
@@ -753,7 +757,10 @@ async def _create_subscription_on_server(
                 if not login_data.get("success"):
                     raise ConnectionError(f"Не удалось авторизоваться в панели сервера {server.name}")
                 server_xui._logged_in = True  # Помечаем как авторизованный
-                success = server_xui.add_client(server.inbound_id, new_uuid, email, sub_id=sub_id)
+                success = server_xui.add_client(
+                    server.inbound_id, new_uuid, email,
+                    sub_id=sub_id, expiry_time=expiry_ms
+                )
                 vpn_host = server.host
                 vpn_port = server.vpn_port
                 actual_server_id = server.id
@@ -1066,7 +1073,7 @@ async def handle_payment_success(
 ) -> None:
     """
     Callback для обработки успешного платежа от YooKassa.
-    Создаёт подписку и уведомляет пользователя.
+    Проверяет существующую подписку и продлевает или создаёт новую.
     """
     logger.info(
         "Payment success: user=%s, plan=%s, server=%s, amount=%s",
@@ -1083,80 +1090,124 @@ async def handle_payment_success(
     if not server_manager.servers:
         server_manager.load_config()
 
-    # Выбираем сервер
-    if server_id:
-        server = server_manager.get_server(server_id)
-    else:
-        server = server_manager.get_best_server()
-
-    use_default = server is None
-
-    # Создание VPN-клиента
     now = datetime.utcnow()
-    new_uuid = generate_uuid()
-    sub_id = generate_sub_id()
-    email = f"tg_{user_id}_{int(now.timestamp())}"
-    end = now + timedelta(days=plan["days"])
 
-    try:
-        if use_default:
-            success = xui.add_client(INBOUND_ID, new_uuid, email, sub_id=sub_id)
+    # Проверяем существующую подписку
+    existing_sub = await get_active_sub(user_id)
+    existing_server_id = existing_sub.get("server_id", "default") if existing_sub else None
+    is_server_change = server_id and existing_server_id and server_id != existing_server_id
+
+    # ── Если есть активная подписка на ТОМ ЖЕ сервере — продлеваем ─────────
+    if existing_sub and existing_sub.get("vless_uuid") and not is_server_change:
+        # Продление: добавляем дни к текущей дате окончания
+        current_end = datetime.fromisoformat(existing_sub["end_date"])
+        base_date = max(current_end, now)
+        end = base_date + timedelta(days=plan["days"])
+
+        # Обновляем дату окончания в БД
+        await extend_subscription_to_date(user_id, end)
+
+        # Используем существующий конфиг
+        new_uuid = existing_sub["vless_uuid"]
+        sub_id = existing_sub.get("xui_sub_id", "")
+        actual_server_id = existing_sub.get("server_id", "default")
+
+        # Определяем хост для ссылки
+        if actual_server_id and actual_server_id != "default":
+            server = server_manager.get_server(actual_server_id)
+            vpn_host = server.host if server else VPN_HOST
+            vpn_port = server.vpn_port if server else VPN_PORT
+        else:
+            server = None
             vpn_host = VPN_HOST
             vpn_port = VPN_PORT
-            actual_server_id = "default"
+
+        is_extension = True
+        logger.info("Extending subscription for user %s to %s", user_id, end)
+
+    else:
+        # ── Новая подписка — создаём VPN-клиент ────────────────────────────
+        is_extension = False
+
+        # Выбираем сервер
+        if server_id:
+            server = server_manager.get_server(server_id)
         else:
-            from xui_api import XUIAPI
-            server_xui = XUIAPI()
-            if server.xui_host not in ("127.0.0.1", "localhost"):
-                protocol = "https"
-            elif server.xui_port in (443, 2053, 2096):
-                protocol = "https"
-            else:
-                protocol = "http"
-            server_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
-            login_resp = server_xui.session.post(
-                f"{server_xui.base_url}/login",
-                json={"username": server.xui_username, "password": server.xui_password},
-                verify=False,
-                timeout=10,
-            )
-            login_data = login_resp.json()
-            if not login_data.get("success"):
-                raise ConnectionError(f"Не удалось авторизоваться в панели сервера {server.name}")
-            server_xui._logged_in = True
-            success = server_xui.add_client(server.inbound_id, new_uuid, email, sub_id=sub_id)
-            vpn_host = server.host
-            vpn_port = server.vpn_port
-            actual_server_id = server.id
-            server.current_users += 1
+            server = server_manager.get_best_server()
 
-        if not success:
-            raise RuntimeError("3X-UI add_client вернул False")
+        use_default = server is None
+        end = now + timedelta(days=plan["days"])
+        expiry_ms = int(end.timestamp() * 1000)  # 3X-UI использует миллисекунды
 
-    except Exception as e:
-        logger.error("Ошибка создания VPN-клиента после оплаты: %s", e)
-        await notify_error("Создание VPN-клиента (оплата)", e)
+        new_uuid = generate_uuid()
+        sub_id = generate_sub_id()
+        email = f"tg_{user_id}_{int(now.timestamp())}"
+
         try:
-            await bot.send_message(
-                user_id,
-                "❌ Оплата прошла, но не удалось создать VPN-конфиг.\n"
-                "Обратитесь в поддержку — мы всё исправим!",
-            )
-        except Exception:
-            pass
-        return
+            if use_default:
+                success = xui.add_client(
+                    INBOUND_ID, new_uuid, email,
+                    sub_id=sub_id, expiry_time=expiry_ms
+                )
+                vpn_host = VPN_HOST
+                vpn_port = VPN_PORT
+                actual_server_id = "default"
+            else:
+                from xui_api import XUIAPI
+                server_xui = XUIAPI()
+                if server.xui_host not in ("127.0.0.1", "localhost"):
+                    protocol = "https"
+                elif server.xui_port in (443, 2053, 2096):
+                    protocol = "https"
+                else:
+                    protocol = "http"
+                server_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+                login_resp = server_xui.session.post(
+                    f"{server_xui.base_url}/login",
+                    json={"username": server.xui_username, "password": server.xui_password},
+                    verify=False,
+                    timeout=10,
+                )
+                login_data = login_resp.json()
+                if not login_data.get("success"):
+                    raise ConnectionError(f"Не удалось авторизоваться в панели сервера {server.name}")
+                server_xui._logged_in = True
+                success = server_xui.add_client(
+                    server.inbound_id, new_uuid, email,
+                    sub_id=sub_id, expiry_time=expiry_ms
+                )
+                vpn_host = server.host
+                vpn_port = server.vpn_port
+                actual_server_id = server.id
+                server.current_users += 1
 
-    # Деактивируем старые подписки и создаём новую
-    await deactivate_user_subs(user_id)
-    await create_subscription(
-        user_id=user_id,
-        plan=plan_key,
-        start_date=now.isoformat(),
-        end_date=end.isoformat(),
-        vless_uuid=new_uuid,
-        xui_sub_id=sub_id,
-        server_id=actual_server_id,
-    )
+            if not success:
+                raise RuntimeError("3X-UI add_client вернул False")
+
+        except Exception as e:
+            logger.error("Ошибка создания VPN-клиента после оплаты: %s", e)
+            await notify_error("Создание VPN-клиента (оплата)", e)
+            try:
+                await bot.send_message(
+                    user_id,
+                    "❌ Оплата прошла, но не удалось создать VPN-конфиг.\n"
+                    "Обратитесь в поддержку — мы всё исправим!",
+                )
+            except Exception:
+                pass
+            return
+
+        # Деактивируем старые подписки и создаём новую
+        await deactivate_user_subs(user_id)
+        await create_subscription(
+            user_id=user_id,
+            plan=plan_key,
+            start_date=now.isoformat(),
+            end_date=end.isoformat(),
+            vless_uuid=new_uuid,
+            xui_sub_id=sub_id,
+            server_id=actual_server_id,
+        )
 
     # Реферальный бонус
     referral_bonus_text = ""
