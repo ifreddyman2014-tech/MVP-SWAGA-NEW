@@ -49,6 +49,13 @@ def plans_kb(trial_used: bool) -> InlineKeyboardMarkup:
                 callback_data=f"plan_{key}",
             )
         )
+    # Кнопка ввода промокода
+    kb.add(
+        InlineKeyboardButton(
+            text="🎟 Ввести промокод",
+            callback_data="enter_promo",
+        )
+    )
     return kb
 
 

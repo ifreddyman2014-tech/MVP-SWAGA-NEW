@@ -509,3 +509,143 @@ async def get_pending_payment(user_id: int) -> dict | None:
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
+
+
+# ── Promo Codes ───────────────────────────────────────────────────────────────
+
+async def init_promo_table() -> None:
+    """Создать таблицу промокодов если не существует."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS promo_codes (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                code          TEXT    UNIQUE NOT NULL,
+                discount_percent INTEGER DEFAULT 0,
+                bonus_days    INTEGER DEFAULT 0,
+                max_uses      INTEGER DEFAULT 0,
+                uses_count    INTEGER DEFAULT 0,
+                expires_at    TEXT    DEFAULT NULL,
+                is_active     INTEGER DEFAULT 1,
+                created_at    TEXT    NOT NULL
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS promo_uses (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                promo_id   INTEGER NOT NULL,
+                user_id    INTEGER NOT NULL,
+                used_at    TEXT    NOT NULL,
+                FOREIGN KEY (promo_id) REFERENCES promo_codes(id),
+                FOREIGN KEY (user_id) REFERENCES users(user_id),
+                UNIQUE(promo_id, user_id)
+            )
+        """)
+        await db.commit()
+
+
+async def create_promo_code(
+    code: str,
+    discount_percent: int = 0,
+    bonus_days: int = 0,
+    max_uses: int = 0,
+    expires_at: str = None,
+) -> bool:
+    """Создать промокод. Возвращает True при успехе."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute(
+                """INSERT INTO promo_codes
+                   (code, discount_percent, bonus_days, max_uses, expires_at, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (code.upper(), discount_percent, bonus_days, max_uses, expires_at,
+                 datetime.utcnow().isoformat()),
+            )
+            await db.commit()
+            return True
+        except Exception:
+            return False
+
+
+async def get_promo_code(code: str) -> dict | None:
+    """Получить промокод по коду."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM promo_codes WHERE code = ? AND is_active = 1",
+            (code.upper(),),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def validate_promo_code(code: str, user_id: int) -> tuple[bool, str, dict | None]:
+    """
+    Проверить промокод для пользователя.
+    Возвращает: (is_valid, error_message, promo_data)
+    """
+    promo = await get_promo_code(code)
+    if not promo:
+        return False, "Промокод не найден или неактивен", None
+
+    # Проверка срока действия
+    if promo["expires_at"]:
+        expires = datetime.fromisoformat(promo["expires_at"])
+        if datetime.utcnow() > expires:
+            return False, "Срок действия промокода истёк", None
+
+    # Проверка лимита использований
+    if promo["max_uses"] > 0 and promo["uses_count"] >= promo["max_uses"]:
+        return False, "Промокод больше не действует", None
+
+    # Проверка, не использовал ли пользователь уже этот промокод
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT id FROM promo_uses WHERE promo_id = ? AND user_id = ?",
+            (promo["id"], user_id),
+        )
+        if await cursor.fetchone():
+            return False, "Вы уже использовали этот промокод", None
+
+    return True, "", promo
+
+
+async def use_promo_code(promo_id: int, user_id: int) -> bool:
+    """Отметить использование промокода пользователем."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            # Записываем использование
+            await db.execute(
+                "INSERT INTO promo_uses (promo_id, user_id, used_at) VALUES (?, ?, ?)",
+                (promo_id, user_id, datetime.utcnow().isoformat()),
+            )
+            # Увеличиваем счётчик
+            await db.execute(
+                "UPDATE promo_codes SET uses_count = uses_count + 1 WHERE id = ?",
+                (promo_id,),
+            )
+            await db.commit()
+            return True
+        except Exception:
+            return False
+
+
+async def list_promo_codes() -> list[dict]:
+    """Получить все промокоды."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM promo_codes ORDER BY created_at DESC"
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def deactivate_promo_code(code: str) -> bool:
+    """Деактивировать промокод."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "UPDATE promo_codes SET is_active = 0 WHERE code = ?",
+            (code.upper(),),
+        )
+        await db.commit()
+        return cursor.rowcount > 0

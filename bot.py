@@ -41,6 +41,12 @@ from database import (
     REFERRAL_BONUS_DAYS,
     create_payment as db_create_payment,
     get_payment as db_get_payment,
+    init_promo_table,
+    validate_promo_code,
+    use_promo_code,
+    create_promo_code,
+    list_promo_codes,
+    deactivate_promo_code,
 )
 from xui_api import XUIAPI
 from yookassa_payment import create_payment as yookassa_create_payment
@@ -390,6 +396,104 @@ async def cmd_capacity(message: types.Message) -> None:
     await message.answer(text)
 
 
+@dp.message_handler(commands=["promo_add"])
+async def cmd_promo_add(message: types.Message) -> None:
+    """
+    Создать промокод (только для админов).
+    Формат: /promo_add КОД ДНЕЙ [МАКС_ИСПОЛЬЗОВАНИЙ]
+    Пример: /promo_add WINTER2026 30 100
+    """
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("⛔ Эта команда доступна только администраторам.")
+        return
+
+    args = message.get_args().split()
+    if len(args) < 2:
+        await message.answer(
+            "❌ Формат: <code>/promo_add КОД ДНЕЙ [МАКС_ИСПОЛЬЗОВАНИЙ]</code>\n\n"
+            "Пример: <code>/promo_add WINTER2026 30 100</code>\n"
+            "— Промокод WINTER2026 даёт +30 дней, лимит 100 использований\n\n"
+            "Пример: <code>/promo_add VIP7 7</code>\n"
+            "— Промокод VIP7 даёт +7 дней, без лимита"
+        )
+        return
+
+    code = args[0].upper()
+    try:
+        bonus_days = int(args[1])
+    except ValueError:
+        await message.answer("❌ Количество дней должно быть числом.")
+        return
+
+    max_uses = 0
+    if len(args) > 2:
+        try:
+            max_uses = int(args[2])
+        except ValueError:
+            await message.answer("❌ Макс. использований должно быть числом.")
+            return
+
+    success = await create_promo_code(code, bonus_days=bonus_days, max_uses=max_uses)
+    if success:
+        limit_text = f"лимит {max_uses}" if max_uses else "без лимита"
+        await message.answer(
+            f"✅ <b>Промокод создан!</b>\n\n"
+            f"🎟 Код: <code>{code}</code>\n"
+            f"🎁 Бонус: +{bonus_days} дней\n"
+            f"📊 Лимит: {limit_text}"
+        )
+    else:
+        await message.answer(f"❌ Не удалось создать промокод. Возможно, код <b>{code}</b> уже существует.")
+
+
+@dp.message_handler(commands=["promo_list"])
+async def cmd_promo_list(message: types.Message) -> None:
+    """Список всех промокодов (только для админов)."""
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("⛔ Эта команда доступна только администраторам.")
+        return
+
+    promos = await list_promo_codes()
+    if not promos:
+        await message.answer("📋 Промокодов пока нет.\n\nСоздайте: <code>/promo_add КОД ДНЕЙ</code>")
+        return
+
+    text = "🎟 <b>Список промокодов:</b>\n\n"
+    for p in promos:
+        status = "✅" if p["is_active"] else "❌"
+        uses = p["uses_count"]
+        max_uses = p["max_uses"] if p["max_uses"] > 0 else "∞"
+        text += (
+            f"{status} <code>{p['code']}</code>\n"
+            f"   +{p['bonus_days']} дн. | {uses}/{max_uses} исп.\n"
+        )
+
+    text += "\n<i>Удалить: /promo_del КОД</i>"
+    await message.answer(text)
+
+
+@dp.message_handler(commands=["promo_del"])
+async def cmd_promo_del(message: types.Message) -> None:
+    """Деактивировать промокод (только для админов)."""
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("⛔ Эта команда доступна только администраторам.")
+        return
+
+    code = message.get_args().strip().upper()
+    if not code:
+        await message.answer("❌ Укажите код: <code>/promo_del КОД</code>")
+        return
+
+    success = await deactivate_promo_code(code)
+    if success:
+        await message.answer(f"✅ Промокод <code>{code}</code> деактивирован.")
+    else:
+        await message.answer(f"❌ Промокод <code>{code}</code> не найден.")
+
+
 @dp.message_handler(commands=["servers"])
 async def cmd_servers(message: types.Message) -> None:
     """Показать статус серверов (только для админов)."""
@@ -532,6 +636,74 @@ async def cmd_server_toggle(message: types.Message) -> None:
 # ══════════════════════════════════════════════════════════════════════════════
 #  CALLBACKS
 # ══════════════════════════════════════════════════════════════════════════════
+
+# Состояние ожидания ввода промокода
+waiting_promo_code: set[int] = set()
+
+
+@dp.callback_query_handler(lambda c: c.data == "enter_promo")
+async def cb_enter_promo(callback: types.CallbackQuery) -> None:
+    """Начать ввод промокода."""
+    waiting_promo_code.add(callback.from_user.id)
+    await callback.message.answer(
+        "🎟 <b>Введите промокод:</b>\n\n"
+        "Отправьте промокод одним сообщением.",
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@dp.message_handler(lambda m: m.from_user.id in waiting_promo_code)
+async def handle_promo_code_input(message: types.Message) -> None:
+    """Обработка введённого промокода."""
+    user_id = message.from_user.id
+    waiting_promo_code.discard(user_id)
+
+    code = message.text.strip().upper()
+    if not code:
+        await message.answer("❌ Промокод не может быть пустым.")
+        return
+
+    # Проверяем промокод
+    is_valid, error_msg, promo = await validate_promo_code(code, user_id)
+    if not is_valid:
+        await message.answer(f"❌ {error_msg}")
+        return
+
+    # Проверяем, есть ли активная подписка для применения бонуса
+    sub = await get_active_sub(user_id)
+    bonus_days = promo["bonus_days"]
+    discount = promo["discount_percent"]
+
+    if bonus_days > 0 and sub:
+        # Применяем бонусные дни
+        await extend_subscription(user_id, bonus_days)
+        await use_promo_code(promo["id"], user_id)
+        await message.answer(
+            f"✅ <b>Промокод применён!</b>\n\n"
+            f"🎁 Добавлено дней: <b>+{bonus_days}</b>\n\n"
+            f"Проверьте новую дату в Личном кабинете.",
+            parse_mode="HTML",
+        )
+    elif bonus_days > 0 and not sub:
+        await message.answer(
+            f"ℹ️ Промокод даёт <b>+{bonus_days} дней</b>, "
+            f"но у вас нет активной подписки.\n\n"
+            f"Сначала оформите подписку, затем примените промокод.",
+            parse_mode="HTML",
+        )
+    elif discount > 0:
+        # Промокод на скидку — сохраняем для использования при оплате
+        # TODO: реализовать скидки при оплате
+        await use_promo_code(promo["id"], user_id)
+        await message.answer(
+            f"✅ <b>Промокод активирован!</b>\n\n"
+            f"💰 Скидка <b>{discount}%</b> будет применена при следующей оплате.",
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer("❌ Промокод не содержит бонусов.")
+
 
 @dp.callback_query_handler(lambda c: c.data == "get_access")
 async def cb_get_access(callback: types.CallbackQuery) -> None:
@@ -1434,6 +1606,7 @@ async def handle_payment_success(
 async def on_startup(_dp: Dispatcher) -> None:
     """Инициализация при запуске бота."""
     await init_db()
+    await init_promo_table()
     logger.info("База данных инициализирована")
 
     # Установка callback для обработки успешных платежей
