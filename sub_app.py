@@ -289,6 +289,75 @@ async def handle_connect(request: web.Request) -> web.Response:
     return web.Response(text=html, content_type="text/html")
 
 
+# ── YooKassa Webhook ─────────────────────────────────────────────────────────
+
+# Callback для обработки успешного платежа (будет установлен из bot.py)
+_payment_success_callback = None
+
+
+def set_payment_callback(callback):
+    """Установить callback для обработки успешного платежа."""
+    global _payment_success_callback
+    _payment_success_callback = callback
+
+
+@routes.post("/webhook/yookassa")
+async def handle_yookassa_webhook(request: web.Request) -> web.Response:
+    """Обработка webhook от YooKassa."""
+    try:
+        body = await request.text()
+        logger.info("YooKassa webhook received: %s", body[:500])
+
+        from yookassa_payment import parse_webhook
+        from database import get_payment, update_payment_status
+
+        data = parse_webhook(body)
+        if not data:
+            logger.error("Failed to parse webhook")
+            return web.Response(status=400, text="Invalid webhook")
+
+        payment_id = data["payment_id"]
+        event = data["event"]
+        status = data["status"]
+
+        logger.info(
+            "Webhook: event=%s, payment_id=%s, status=%s, user=%s",
+            event, payment_id, status, data.get("user_id")
+        )
+
+        # Проверяем, что платёж существует в нашей БД
+        payment = await get_payment(payment_id)
+        if not payment:
+            logger.warning("Payment not found in DB: %s", payment_id)
+            # Всё равно возвращаем 200, чтобы YooKassa не повторяла запрос
+            return web.Response(status=200, text="OK")
+
+        # Обновляем статус платежа
+        if status == "succeeded":
+            from datetime import datetime
+            await update_payment_status(payment_id, "succeeded", datetime.utcnow().isoformat())
+
+            # Вызываем callback для активации подписки
+            if _payment_success_callback:
+                await _payment_success_callback(
+                    user_id=data["user_id"],
+                    plan_key=data["plan_key"],
+                    server_id=data["server_id"],
+                    amount=data["amount"],
+                )
+            else:
+                logger.warning("Payment success callback not set!")
+
+        elif status == "canceled":
+            await update_payment_status(payment_id, "canceled")
+
+        return web.Response(status=200, text="OK")
+
+    except Exception as e:
+        logger.error("Error processing webhook: %s", e)
+        return web.Response(status=500, text="Internal error")
+
+
 # ── Server lifecycle ─────────────────────────────────────────────────────────
 
 _runner: web.AppRunner | None = None

@@ -10,6 +10,7 @@ load_dotenv()
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 BOT_TOKEN: str = os.getenv("BOT_TOKEN", "")
+BOT_USERNAME: str = os.getenv("BOT_USERNAME", "Swaga_vpnbot")
 ADMIN_IDS: list[int] = [
     int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip()
 ]
@@ -25,9 +26,10 @@ XUI_USER: str = os.getenv("XUI_USERNAME", "")
 XUI_PASS: str = os.getenv("XUI_PASSWORD", "")
 INBOUND_ID: int = int(os.getenv("INBOUND_ID", "1"))
 
-# ── YooKassa (stub) ──────────────────────────────────────────────────────────
-YOOKASSA_ID: str = os.getenv("YOOKASSA_ACCOUNT_ID", "")
-YOOKASSA_KEY: str = os.getenv("YOOKASSA_SECRET_KEY", "")
+# ── YooKassa ─────────────────────────────────────────────────────────────────
+YOOKASSA_SHOP_ID: str = os.getenv("YOOKASSA_SHOP_ID", "")
+YOOKASSA_SECRET_KEY: str = os.getenv("YOOKASSA_SECRET_KEY", "")
+YOOKASSA_WEBHOOK_SECRET: str = os.getenv("YOOKASSA_WEBHOOK_SECRET", "")  # Опционально
 
 # ── VPN connection ───────────────────────────────────────────────────────────
 # VPN_HOST — публичный IP или домен сервера (для клиентского подключения)

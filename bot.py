@@ -39,12 +39,14 @@ from database import (
     extend_subscription_to_date,
     count_users,
     REFERRAL_BONUS_DAYS,
+    create_payment as db_create_payment,
+    get_payment as db_get_payment,
 )
 from xui_api import XUIAPI
-from payment import process_payment
+from yookassa_payment import create_payment as yookassa_create_payment
 from backup import backup_now
 from utils import generate_uuid, generate_sub_id, format_date, build_vless_link
-from sub_app import start_sub_server, stop_sub_server
+from sub_app import start_sub_server, stop_sub_server, set_payment_callback
 from keyboards import (
     main_menu_kb,
     plans_kb,
@@ -617,14 +619,46 @@ async def _create_subscription_on_server(
             return
         await mark_trial_used(user_id)
 
-    # ── Платный тариф ─────────────────────────────────────────────────────
+    # ── Платный тариф — создаём платёж в YooKassa ────────────────────────
     if plan["price"] > 0:
-        payment_ok = await process_payment(user_id, plan["price"], plan_key)
-        if not payment_ok:
+        # Создаём платёж
+        payment_result = yookassa_create_payment(
+            amount=plan["price"],
+            user_id=user_id,
+            plan_key=plan_key,
+            server_id=server_id or "",
+            description=f"SWAGA VPN — {plan['name']}",
+        )
+
+        if not payment_result:
             await callback.message.answer(
-                "❌ Ошибка при обработке платежа. Попробуйте позже."
+                "❌ Ошибка при создании платежа. Попробуйте позже."
             )
             return
+
+        # Сохраняем платёж в БД
+        await db_create_payment(
+            payment_id=payment_result["payment_id"],
+            user_id=user_id,
+            amount=plan["price"],
+            plan_key=plan_key,
+            server_id=server_id or "",
+        )
+
+        # Отправляем ссылку на оплату
+        pay_url = payment_result["confirmation_url"]
+        await callback.message.answer(
+            f"💳 <b>Оплата подписки</b>\n\n"
+            f"📦 Тариф: <b>{plan['name']}</b>\n"
+            f"💰 Сумма: <b>{plan['price']} ₽</b>\n\n"
+            f"Нажмите кнопку ниже для оплаты.\n"
+            f"После оплаты подписка активируется автоматически.",
+            reply_markup=types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("💳 Оплатить", url=pay_url)
+            ),
+        )
+        await callback.answer()
+        return  # Не создаём подписку — это сделает webhook
 
     # ── Проверяем, есть ли активная подписка (для продления) ─────────────
     existing_sub = await get_active_sub(user_id)
@@ -1021,6 +1055,223 @@ async def _scheduler_backup() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  YOOKASSA PAYMENT CALLBACK
+# ══════════════════════════════════════════════════════════════════════════════
+
+async def handle_payment_success(
+    user_id: int,
+    plan_key: str,
+    server_id: str,
+    amount: float,
+) -> None:
+    """
+    Callback для обработки успешного платежа от YooKassa.
+    Создаёт подписку и уведомляет пользователя.
+    """
+    logger.info(
+        "Payment success: user=%s, plan=%s, server=%s, amount=%s",
+        user_id, plan_key, server_id, amount
+    )
+
+    plan = PLANS.get(plan_key)
+    if not plan:
+        logger.error("Unknown plan: %s", plan_key)
+        return
+
+    # Загружаем серверы
+    from servers import server_manager
+    if not server_manager.servers:
+        server_manager.load_config()
+
+    # Выбираем сервер
+    if server_id:
+        server = server_manager.get_server(server_id)
+    else:
+        server = server_manager.get_best_server()
+
+    use_default = server is None
+
+    # Создание VPN-клиента
+    now = datetime.utcnow()
+    new_uuid = generate_uuid()
+    sub_id = generate_sub_id()
+    email = f"tg_{user_id}_{int(now.timestamp())}"
+    end = now + timedelta(days=plan["days"])
+
+    try:
+        if use_default:
+            success = xui.add_client(INBOUND_ID, new_uuid, email, sub_id=sub_id)
+            vpn_host = VPN_HOST
+            vpn_port = VPN_PORT
+            actual_server_id = "default"
+        else:
+            from xui_api import XUIAPI
+            server_xui = XUIAPI()
+            if server.xui_host not in ("127.0.0.1", "localhost"):
+                protocol = "https"
+            elif server.xui_port in (443, 2053, 2096):
+                protocol = "https"
+            else:
+                protocol = "http"
+            server_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+            login_resp = server_xui.session.post(
+                f"{server_xui.base_url}/login",
+                json={"username": server.xui_username, "password": server.xui_password},
+                verify=False,
+                timeout=10,
+            )
+            login_data = login_resp.json()
+            if not login_data.get("success"):
+                raise ConnectionError(f"Не удалось авторизоваться в панели сервера {server.name}")
+            server_xui._logged_in = True
+            success = server_xui.add_client(server.inbound_id, new_uuid, email, sub_id=sub_id)
+            vpn_host = server.host
+            vpn_port = server.vpn_port
+            actual_server_id = server.id
+            server.current_users += 1
+
+        if not success:
+            raise RuntimeError("3X-UI add_client вернул False")
+
+    except Exception as e:
+        logger.error("Ошибка создания VPN-клиента после оплаты: %s", e)
+        await notify_error("Создание VPN-клиента (оплата)", e)
+        try:
+            await bot.send_message(
+                user_id,
+                "❌ Оплата прошла, но не удалось создать VPN-конфиг.\n"
+                "Обратитесь в поддержку — мы всё исправим!",
+            )
+        except Exception:
+            pass
+        return
+
+    # Деактивируем старые подписки и создаём новую
+    await deactivate_user_subs(user_id)
+    await create_subscription(
+        user_id=user_id,
+        plan=plan_key,
+        start_date=now.isoformat(),
+        end_date=end.isoformat(),
+        vless_uuid=new_uuid,
+        xui_sub_id=sub_id,
+        server_id=actual_server_id,
+    )
+
+    # Реферальный бонус
+    referral_bonus_text = ""
+    referrer_id = await process_referral_bonus(user_id)
+    if referrer_id:
+        referrer_extended = await extend_subscription(referrer_id, REFERRAL_BONUS_DAYS)
+        if referrer_extended:
+            try:
+                await bot.send_message(
+                    referrer_id,
+                    f"🎉 <b>Реферальный бонус!</b>\n\n"
+                    f"Ваш друг оплатил подписку.\n"
+                    f"Вам добавлено <b>+{REFERRAL_BONUS_DAYS} дней</b>!",
+                    parse_mode=types.ParseMode.HTML,
+                )
+            except Exception:
+                pass
+        await extend_subscription(user_id, REFERRAL_BONUS_DAYS)
+        referral_bonus_text = f"\n🎁 <b>Реферальный бонус:</b> +{REFERRAL_BONUS_DAYS} дней!"
+        end = end + timedelta(days=REFERRAL_BONUS_DAYS)
+
+    # Формируем VLESS ссылку
+    srv = server_manager.get_server(actual_server_id) if actual_server_id != "default" else None
+
+    location_names = {
+        "DE": "Germany", "NL": "Netherlands", "US": "USA", "FI": "Finland",
+        "FR": "France", "GB": "UK", "LV": "Latvia", "RU": "Russia", "KZ": "Kazakhstan",
+    }
+    if srv:
+        loc_name = location_names.get(srv.location, srv.location or "")
+        remark = f"SWAGA {loc_name}".strip() if loc_name else "SWAGA VPN"
+    else:
+        remark = "SWAGA VPN"
+
+    if srv and srv.reality_pbk:
+        vless_link = build_vless_link(
+            uuid_str=new_uuid,
+            host=vpn_host,
+            port=vpn_port,
+            transport=srv.transport or VPN_TRANSPORT,
+            path=srv.transport_path or VPN_PATH,
+            camouflage_host=srv.transport_host or VPN_CAMOUFLAGE_HOST,
+            xhttp_mode=srv.xhttp_mode or VPN_XHTTP_MODE,
+            reality_pbk=srv.reality_pbk,
+            reality_sid=srv.reality_sid,
+            reality_fp=srv.reality_fp or REALITY_FINGERPRINT,
+            reality_sni=srv.reality_sni,
+            reality_spx=REALITY_SPIDERX,
+            remark=remark,
+        )
+    else:
+        vless_link = build_vless_link(
+            uuid_str=new_uuid,
+            host=vpn_host,
+            port=vpn_port,
+            transport=VPN_TRANSPORT,
+            path=VPN_PATH,
+            camouflage_host=VPN_CAMOUFLAGE_HOST,
+            xhttp_mode=VPN_XHTTP_MODE,
+            reality_pbk=REALITY_PUBLIC_KEY,
+            reality_sid=REALITY_SHORT_ID,
+            reality_fp=REALITY_FINGERPRINT,
+            reality_sni=REALITY_SNI,
+            reality_spx=REALITY_SPIDERX,
+            remark=remark,
+        )
+
+    # Информация о сервере
+    server_info = ""
+    if srv:
+        server_info = f"\n🌍 Сервер: <b>{srv.name}</b>"
+
+    connect_base = SUB_BASE_URL.replace("/sub/", "/connect/")
+    sub_url = f"{connect_base}{sub_id}"
+
+    # Уведомляем пользователя
+    try:
+        text = (
+            "✅ <b>Оплата прошла успешно!</b>\n\n"
+            f"📦 Тариф: <b>{plan['name']}</b>\n"
+            f"💰 Сумма: <b>{amount:.0f} ₽</b>\n"
+            f"📅 Действует до: <b>{format_date(end)}</b>"
+            f"{server_info}"
+            f"{referral_bonus_text}\n\n"
+            f"🔑 <b>Ваш конфиг:</b>\n"
+            f"<code>{vless_link}</code>\n\n"
+            "📲 Нажмите кнопку для подключения."
+        )
+        await bot.send_message(
+            user_id,
+            text,
+            reply_markup=quick_connect_kb(sub_url),
+            parse_mode=types.ParseMode.HTML,
+        )
+    except Exception as e:
+        logger.error("Не удалось уведомить пользователя %s: %s", user_id, e)
+
+    # Уведомление админам
+    try:
+        user = await get_user(user_id)
+        username = user.get("username") if user else None
+        user_link = f"@{username}" if username else f"ID: {user_id}"
+        await notify_admins(
+            f"💰 <b>Новая оплата!</b>\n\n"
+            f"👤 Пользователь: {user_link}\n"
+            f"📦 Тариф: <b>{plan['name']}</b>\n"
+            f"💵 Сумма: <b>{amount:.0f} ₽</b>\n"
+            f"📅 До: <b>{format_date(end)}</b>\n"
+            f"🌍 Сервер: <b>{actual_server_id}</b>"
+        )
+    except Exception as e:
+        logger.error("Ошибка уведомления админов: %s", e)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  STARTUP / SHUTDOWN
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1028,6 +1279,10 @@ async def on_startup(_dp: Dispatcher) -> None:
     """Инициализация при запуске бота."""
     await init_db()
     logger.info("База данных инициализирована")
+
+    # Установка callback для обработки успешных платежей
+    set_payment_callback(handle_payment_success)
+    logger.info("YooKassa callback установлен")
 
     # Удаление старых команд и установка новых (меню слева)
     try:

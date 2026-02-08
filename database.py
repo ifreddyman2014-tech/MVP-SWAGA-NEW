@@ -70,6 +70,21 @@ async def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
+        # Таблица платежей YooKassa
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS payments (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                payment_id    TEXT    UNIQUE NOT NULL,
+                user_id       INTEGER NOT NULL,
+                amount        REAL    NOT NULL,
+                plan_key      TEXT    NOT NULL,
+                server_id     TEXT    DEFAULT '',
+                status        TEXT    DEFAULT 'pending',
+                created_at    TEXT    NOT NULL,
+                paid_at       TEXT    DEFAULT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            )
+        """)
         await db.commit()
 
 
@@ -422,3 +437,69 @@ async def count_users() -> int:
         cursor = await db.execute("SELECT COUNT(*) FROM users")
         row = await cursor.fetchone()
         return row[0] if row else 0
+
+
+# ── Payments (YooKassa) ───────────────────────────────────────────────────────
+
+async def create_payment(
+    payment_id: str,
+    user_id: int,
+    amount: float,
+    plan_key: str,
+    server_id: str = "",
+) -> bool:
+    """Создать запись о платеже."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute(
+                """INSERT INTO payments (payment_id, user_id, amount, plan_key, server_id, status, created_at)
+                   VALUES (?, ?, ?, ?, ?, 'pending', ?)""",
+                (payment_id, user_id, amount, plan_key, server_id, datetime.utcnow().isoformat()),
+            )
+            await db.commit()
+            return True
+        except Exception:
+            return False
+
+
+async def get_payment(payment_id: str) -> dict | None:
+    """Получить платёж по ID."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM payments WHERE payment_id = ?",
+            (payment_id,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+
+async def update_payment_status(payment_id: str, status: str, paid_at: str = None) -> bool:
+    """Обновить статус платежа."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        if paid_at:
+            await db.execute(
+                "UPDATE payments SET status = ?, paid_at = ? WHERE payment_id = ?",
+                (status, paid_at, payment_id),
+            )
+        else:
+            await db.execute(
+                "UPDATE payments SET status = ? WHERE payment_id = ?",
+                (status, payment_id),
+            )
+        await db.commit()
+        return True
+
+
+async def get_pending_payment(user_id: int) -> dict | None:
+    """Получить последний ожидающий платёж пользователя."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT * FROM payments
+               WHERE user_id = ? AND status = 'pending'
+               ORDER BY created_at DESC LIMIT 1""",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
