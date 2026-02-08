@@ -170,11 +170,18 @@ async def cmd_start(message: types.Message) -> None:
 @dp.message_handler(Text(equals="Получить доступ"))
 async def handle_get_access(message: types.Message) -> None:
     """Показать доступные тарифные планы."""
-    user = await get_user(message.from_user.id)
+    user_id = message.from_user.id
+    user = await get_user(user_id)
     trial_used = bool(user and user["trial_used"])
+    # Проверяем активную скидку
+    _, discount = await get_user_discount(user_id)
+    if discount > 0:
+        text = f"📋 <b>Выберите тарифный план:</b>\n\n🎟 Активна скидка: <b>-{discount}%</b>"
+    else:
+        text = "📋 <b>Выберите тарифный план:</b>"
     await message.answer(
-        "📋 <b>Выберите тарифный план:</b>",
-        reply_markup=plans_kb(trial_used),
+        text,
+        reply_markup=plans_kb(trial_used, discount_percent=discount),
     )
 
 
@@ -760,11 +767,15 @@ async def handle_promo_code_input(message: types.Message) -> None:
     elif discount > 0:
         # Промокод на скидку — сохраняем для использования при оплате
         await set_user_discount_promo(user_id, promo["id"], discount)
+        # Показываем меню с новыми ценами
+        user = await get_user(user_id)
+        trial_used = bool(user and user["trial_used"])
         await message.answer(
             f"✅ <b>Промокод активирован!</b>\n\n"
-            f"💰 Скидка <b>{discount}%</b> будет применена при следующей оплате.\n\n"
-            f"Выберите тариф в меню «Получить доступ».",
+            f"💰 Скидка: <b>-{discount}%</b>\n\n"
+            f"Выберите тариф:",
             parse_mode="HTML",
+            reply_markup=plans_kb(trial_used, discount_percent=discount),
         )
     else:
         await message.answer("❌ Промокод не содержит бонусов.")
@@ -773,11 +784,18 @@ async def handle_promo_code_input(message: types.Message) -> None:
 @dp.callback_query_handler(lambda c: c.data == "get_access")
 async def cb_get_access(callback: types.CallbackQuery) -> None:
     """Inline-кнопка 'Получить доступ' (из инструкции/кабинета)."""
-    user = await get_user(callback.from_user.id)
+    user_id = callback.from_user.id
+    user = await get_user(user_id)
     trial_used = bool(user and user["trial_used"])
+    # Проверяем активную скидку
+    _, discount = await get_user_discount(user_id)
+    if discount > 0:
+        text = f"📋 <b>Выберите тарифный план:</b>\n\n🎟 Активна скидка: <b>-{discount}%</b>"
+    else:
+        text = "📋 <b>Выберите тарифный план:</b>"
     await callback.message.answer(
-        "📋 <b>Выберите тарифный план:</b>",
-        reply_markup=plans_kb(trial_used),
+        text,
+        reply_markup=plans_kb(trial_used, discount_percent=discount),
     )
     await callback.answer()
 
