@@ -630,8 +630,12 @@ async def _create_subscription_on_server(
     existing_sub = await get_active_sub(user_id)
     now = datetime.utcnow()
 
-    # ── Если есть активная подписка — продлеваем её ────────────────────────
-    if existing_sub and existing_sub.get("vless_uuid"):
+    # Проверяем, выбрал ли пользователь другой сервер
+    existing_server_id = existing_sub.get("server_id", "default") if existing_sub else None
+    is_server_change = server_id and existing_server_id and server_id != existing_server_id
+
+    # ── Если есть активная подписка на ТОМ ЖЕ сервере — продлеваем ─────────
+    if existing_sub and existing_sub.get("vless_uuid") and not is_server_change:
         # Продление: добавляем дни к текущей дате окончания
         current_end = datetime.fromisoformat(existing_sub["end_date"])
         # Если подписка ещё не истекла — добавляем к ней, иначе от сейчас
