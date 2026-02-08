@@ -185,20 +185,44 @@ async def handle_cabinet(message: types.Message) -> None:
         await message.answer(NO_ACTIVE_SUB_TEXT, reply_markup=cabinet_kb())
         return
 
-    vless_link = build_vless_link(
-        uuid_str=sub["vless_uuid"],
-        host=VPN_HOST,
-        port=VPN_PORT,
-        transport=VPN_TRANSPORT,
-        path=VPN_PATH,
-        camouflage_host=VPN_CAMOUFLAGE_HOST,
-        xhttp_mode=VPN_XHTTP_MODE,
-        reality_pbk=REALITY_PUBLIC_KEY,
-        reality_sid=REALITY_SHORT_ID,
-        reality_fp=REALITY_FINGERPRINT,
-        reality_sni=REALITY_SNI,
-        reality_spx=REALITY_SPIDERX,
-    )
+    # Получаем настройки сервера из подписки
+    server_id = sub.get("server_id", "default")
+    from servers import server_manager
+    if not server_manager.servers:
+        server_manager.load_config()
+
+    srv = server_manager.get_server(server_id) if server_id and server_id != "default" else None
+
+    if srv and srv.reality_pbk:
+        vless_link = build_vless_link(
+            uuid_str=sub["vless_uuid"],
+            host=srv.host,
+            port=srv.vpn_port,
+            transport=srv.transport or VPN_TRANSPORT,
+            path=srv.transport_path or VPN_PATH,
+            camouflage_host=srv.transport_host or VPN_CAMOUFLAGE_HOST,
+            xhttp_mode=srv.xhttp_mode or VPN_XHTTP_MODE,
+            reality_pbk=srv.reality_pbk,
+            reality_sid=srv.reality_sid,
+            reality_fp=srv.reality_fp or REALITY_FINGERPRINT,
+            reality_sni=srv.reality_sni,
+            reality_spx=REALITY_SPIDERX,
+        )
+    else:
+        vless_link = build_vless_link(
+            uuid_str=sub["vless_uuid"],
+            host=VPN_HOST,
+            port=VPN_PORT,
+            transport=VPN_TRANSPORT,
+            path=VPN_PATH,
+            camouflage_host=VPN_CAMOUFLAGE_HOST,
+            xhttp_mode=VPN_XHTTP_MODE,
+            reality_pbk=REALITY_PUBLIC_KEY,
+            reality_sid=REALITY_SHORT_ID,
+            reality_fp=REALITY_FINGERPRINT,
+            reality_sni=REALITY_SNI,
+            reality_spx=REALITY_SPIDERX,
+        )
 
     plan_name = PLANS.get(sub["plan"], {}).get("name", sub["plan"])
     end_date = format_date(sub["end_date"])
