@@ -6,9 +6,8 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/root/MVP-SWAGA-NEW
-Environment="PATH=/root/MVP-SWAGA-NEW/venv/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=/root/MVP-SWAGA-NEW/.env
-ExecStart=/root/MVP-SWAGA-NEW/venv/bin/python support_bot.py
+ExecStart=/usr/bin/python3 /root/MVP-SWAGA-NEW/support_bot.py
 Restart=always
 RestartSec=5
 
