@@ -702,12 +702,16 @@ async def _create_subscription_on_server(
                 else:
                     protocol = "http"
                 server_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
-                server_xui.session.post(
+                login_resp = server_xui.session.post(
                     f"{server_xui.base_url}/login",
                     json={"username": server.xui_username, "password": server.xui_password},
                     verify=False,
                     timeout=10,
                 )
+                login_data = login_resp.json()
+                if not login_data.get("success"):
+                    raise ConnectionError(f"Не удалось авторизоваться в панели сервера {server.name}")
+                server_xui._logged_in = True  # Помечаем как авторизованный
                 success = server_xui.add_client(server.inbound_id, new_uuid, email, sub_id=sub_id)
                 vpn_host = server.host
                 vpn_port = server.vpn_port
