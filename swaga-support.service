@@ -1,0 +1,15 @@
+[Unit]
+Description=SWAGA VPN Support Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/MVP-SWAGA-NEW
+EnvironmentFile=/root/MVP-SWAGA-NEW/.env
+ExecStart=/usr/bin/python3 /root/MVP-SWAGA-NEW/support_bot.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

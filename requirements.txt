@@ -1,26 +1,12 @@
-# Bot Framework
-aiogram==3.13.1
+# Bot Framework (aiogram v2)
+aiogram==2.25.2
 
-# Database
-sqlalchemy[asyncio]==2.0.36
-asyncpg==0.29.0
-alembic==1.14.0
-
-# Web Framework (for webhook)
-fastapi==0.115.6
-uvicorn[standard]==0.32.1
-pydantic==2.10.4
-pydantic-settings==2.7.0
-
-# HTTP Client
-aiohttp==3.11.11
-httpx==0.28.1
-
-# Utilities
-python-dotenv==1.0.1
-python-dateutil==2.9.0
-
-# Migration from legacy
+# Async SQLite
 aiosqlite==0.20.0
-pandas==2.2.3
-openpyxl==3.1.5
+
+# HTTP Client (for 3X-UI API)
+requests==2.32.3
+urllib3==2.2.3
+
+# Environment
+python-dotenv==1.0.1

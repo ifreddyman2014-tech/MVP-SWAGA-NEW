@@ -1,0 +1,15 @@
+[Unit]
+Description=SWAGA VPN Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/MVP-SWAGA-NEW
+ExecStart=/usr/bin/python3 bot.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

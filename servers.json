@@ -1,0 +1,52 @@
+{
+  "servers": [
+    {
+      "id": "de1",
+      "name": "Германия (основной)",
+      "host": "150.241.77.138",
+      "xui_host": "127.0.0.1",
+      "xui_port": 2055,
+      "xui_web_path": "/JXmOAqpCBtH14wRJ2t",
+      "xui_username": "r03-jywLYr",
+      "xui_password": "881NdAr-wBhhWN",
+      "vpn_port": 19571,
+      "inbound_id": 1,
+      "max_users": 150,
+      "priority": 10,
+      "enabled": true,
+      "location": "DE",
+      "transport": "xhttp",
+      "transport_path": "/adv",
+      "transport_host": "yandex.ru",
+      "xhttp_mode": "packet-up",
+      "reality_pbk": "9J1AXF06NYExtH0siVBABHH7IQcnzLMZOWgJIJ4_QA4",
+      "reality_sid": "d425791dd44d31",
+      "reality_sni": "web.de",
+      "reality_fp": "chrome"
+    },
+    {
+      "id": "lv1",
+      "name": "Латвия",
+      "host": "155.212.225.26",
+      "xui_host": "155.212.225.26",
+      "xui_port": 2053,
+      "xui_web_path": "/",
+      "xui_username": "073PdBjAO-",
+      "xui_password": "U_xsnb72bo",
+      "vpn_port": 443,
+      "inbound_id": 1,
+      "max_users": 100,
+      "priority": 5,
+      "enabled": true,
+      "location": "LV",
+      "transport": "xhttp",
+      "transport_path": "/adv",
+      "transport_host": "yandex.ru",
+      "xhttp_mode": "packet-up",
+      "reality_pbk": "ZCxK16sZZVtCYQkupVu5DxTVWS_vGg0odga8bk5EkhI",
+      "reality_sid": "4527ed",
+      "reality_sni": "www.focus.lv",
+      "reality_fp": "chrome"
+    }
+  ]
+}

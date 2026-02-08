@@ -1,0 +1,64 @@
+name: Deploy VPN Bot
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Syntax check
+        run: |
+          python -m py_compile config.py
+          python -m py_compile database.py
+          python -m py_compile xui_api.py
+          python -m py_compile payment.py
+          python -m py_compile backup.py
+          python -m py_compile utils.py
+          python -m py_compile keyboards.py
+          python -m py_compile bot.py
+
+      - name: Import check
+        run: |
+          python -c "
+          from config import BOT_TOKEN, ADMIN_IDS, PLANS, DB_PATH
+          from utils import generate_uuid, format_date, build_vless_link
+          from keyboards import main_menu_kb, plans_kb, instruction_kb
+          from database import init_db, get_user, create_user
+          from xui_api import XUIAPI
+          from payment import process_payment
+          from backup import backup_now
+          print('All imports OK')
+          "
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            cd /opt/vpn-bot
+            git pull origin main
+            source venv/bin/activate
+            pip install -r requirements.txt
+            sudo systemctl restart vpn-bot
+            sleep 3
+            sudo systemctl is-active vpn-bot && echo "Bot is running" || echo "Bot failed to start"
