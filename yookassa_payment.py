@@ -103,8 +103,11 @@ def parse_webhook(request_body: str) -> Optional[dict]:
             "server_id": str,
         }
     """
+    import json
     try:
-        notification = WebhookNotification(request_body)
+        # WebhookNotification ожидает dict, а не строку
+        body_dict = json.loads(request_body)
+        notification = WebhookNotification(body_dict)
         payment = notification.object
 
         metadata = payment.metadata or {}
