@@ -47,6 +47,9 @@ from database import (
     create_promo_code,
     list_promo_codes,
     deactivate_promo_code,
+    set_user_discount_promo,
+    get_user_discount,
+    clear_user_discount,
 )
 from xui_api import XUIAPI
 from yookassa_payment import create_payment as yookassa_create_payment
@@ -399,7 +402,7 @@ async def cmd_capacity(message: types.Message) -> None:
 @dp.message_handler(commands=["promo_add"])
 async def cmd_promo_add(message: types.Message) -> None:
     """
-    Создать промокод (только для админов).
+    Создать промокод на бонусные дни (только для админов).
     Формат: /promo_add КОД ДНЕЙ [МАКС_ИСПОЛЬЗОВАНИЙ]
     Пример: /promo_add WINTER2026 30 100
     """
@@ -415,7 +418,8 @@ async def cmd_promo_add(message: types.Message) -> None:
             "Пример: <code>/promo_add WINTER2026 30 100</code>\n"
             "— Промокод WINTER2026 даёт +30 дней, лимит 100 использований\n\n"
             "Пример: <code>/promo_add VIP7 7</code>\n"
-            "— Промокод VIP7 даёт +7 дней, без лимита"
+            "— Промокод VIP7 даёт +7 дней, без лимита\n\n"
+            "<i>Для скидок: /promo_discount КОД ПРОЦЕНТ</i>"
         )
         return
 
@@ -447,6 +451,60 @@ async def cmd_promo_add(message: types.Message) -> None:
         await message.answer(f"❌ Не удалось создать промокод. Возможно, код <b>{code}</b> уже существует.")
 
 
+@dp.message_handler(commands=["promo_discount"])
+async def cmd_promo_discount(message: types.Message) -> None:
+    """
+    Создать промокод на скидку (только для админов).
+    Формат: /promo_discount КОД ПРОЦЕНТ [МАКС_ИСПОЛЬЗОВАНИЙ]
+    Пример: /promo_discount SALE30 30 50
+    """
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("⛔ Эта команда доступна только администраторам.")
+        return
+
+    args = message.get_args().split()
+    if len(args) < 2:
+        await message.answer(
+            "❌ Формат: <code>/promo_discount КОД ПРОЦЕНТ [МАКС_ИСПОЛЬЗОВАНИЙ]</code>\n\n"
+            "Пример: <code>/promo_discount SALE30 30 50</code>\n"
+            "— Промокод SALE30 даёт скидку 30%, лимит 50 использований\n\n"
+            "Пример: <code>/promo_discount VIP50 50</code>\n"
+            "— Промокод VIP50 даёт скидку 50%, без лимита"
+        )
+        return
+
+    code = args[0].upper()
+    try:
+        discount_percent = int(args[1])
+        if discount_percent < 1 or discount_percent > 99:
+            await message.answer("❌ Скидка должна быть от 1 до 99%.")
+            return
+    except ValueError:
+        await message.answer("❌ Процент скидки должен быть числом.")
+        return
+
+    max_uses = 0
+    if len(args) > 2:
+        try:
+            max_uses = int(args[2])
+        except ValueError:
+            await message.answer("❌ Макс. использований должно быть числом.")
+            return
+
+    success = await create_promo_code(code, discount_percent=discount_percent, max_uses=max_uses)
+    if success:
+        limit_text = f"лимит {max_uses}" if max_uses else "без лимита"
+        await message.answer(
+            f"✅ <b>Промокод на скидку создан!</b>\n\n"
+            f"🎟 Код: <code>{code}</code>\n"
+            f"💰 Скидка: -{discount_percent}%\n"
+            f"📊 Лимит: {limit_text}"
+        )
+    else:
+        await message.answer(f"❌ Не удалось создать промокод. Возможно, код <b>{code}</b> уже существует.")
+
+
 @dp.message_handler(commands=["promo_list"])
 async def cmd_promo_list(message: types.Message) -> None:
     """Список всех промокодов (только для админов)."""
@@ -465,9 +523,16 @@ async def cmd_promo_list(message: types.Message) -> None:
         status = "✅" if p["is_active"] else "❌"
         uses = p["uses_count"]
         max_uses = p["max_uses"] if p["max_uses"] > 0 else "∞"
+        # Показываем или дни, или скидку
+        if p["bonus_days"] > 0:
+            bonus_info = f"+{p['bonus_days']} дн."
+        elif p["discount_percent"] > 0:
+            bonus_info = f"-{p['discount_percent']}%"
+        else:
+            bonus_info = "—"
         text += (
             f"{status} <code>{p['code']}</code>\n"
-            f"   +{p['bonus_days']} дн. | {uses}/{max_uses} исп.\n"
+            f"   {bonus_info} | {uses}/{max_uses} исп.\n"
         )
 
     text += "\n<i>Удалить: /promo_del КОД</i>"
@@ -694,11 +759,11 @@ async def handle_promo_code_input(message: types.Message) -> None:
         )
     elif discount > 0:
         # Промокод на скидку — сохраняем для использования при оплате
-        # TODO: реализовать скидки при оплате
-        await use_promo_code(promo["id"], user_id)
+        await set_user_discount_promo(user_id, promo["id"], discount)
         await message.answer(
             f"✅ <b>Промокод активирован!</b>\n\n"
-            f"💰 Скидка <b>{discount}%</b> будет применена при следующей оплате.",
+            f"💰 Скидка <b>{discount}%</b> будет применена при следующей оплате.\n\n"
+            f"Выберите тариф в меню «Получить доступ».",
             parse_mode="HTML",
         )
     else:
@@ -817,9 +882,19 @@ async def _create_subscription_on_server(
 
     # ── Платный тариф — создаём платёж в YooKassa ────────────────────────
     if plan["price"] > 0:
+        # Проверяем активный промокод на скидку
+        promo_id, discount_percent = await get_user_discount(user_id)
+        original_price = plan["price"]
+        if discount_percent > 0:
+            final_price = int(original_price * (100 - discount_percent) / 100)
+            discount_text = f"🎟 Скидка: <b>-{discount_percent}%</b> (было {original_price} ₽)\n"
+        else:
+            final_price = original_price
+            discount_text = ""
+
         # Создаём платёж
         payment_result = yookassa_create_payment(
-            amount=plan["price"],
+            amount=final_price,
             user_id=user_id,
             plan_key=plan_key,
             server_id=server_id or "",
@@ -836,17 +911,23 @@ async def _create_subscription_on_server(
         await db_create_payment(
             payment_id=payment_result["payment_id"],
             user_id=user_id,
-            amount=plan["price"],
+            amount=final_price,
             plan_key=plan_key,
             server_id=server_id or "",
         )
+
+        # Используем промокод (списываем) и очищаем скидку
+        if promo_id:
+            await use_promo_code(promo_id, user_id)
+            await clear_user_discount(user_id)
 
         # Отправляем ссылку на оплату
         pay_url = payment_result["confirmation_url"]
         await callback.message.answer(
             f"💳 <b>Оплата подписки</b>\n\n"
             f"📦 Тариф: <b>{plan['name']}</b>\n"
-            f"💰 Сумма: <b>{plan['price']} ₽</b>\n\n"
+            f"{discount_text}"
+            f"💰 Сумма: <b>{final_price} ₽</b>\n\n"
             f"Нажмите кнопку ниже для оплаты.\n"
             f"После оплаты подписка активируется автоматически.",
             reply_markup=types.InlineKeyboardMarkup().add(

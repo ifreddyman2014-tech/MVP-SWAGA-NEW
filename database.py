@@ -649,3 +649,46 @@ async def deactivate_promo_code(code: str) -> bool:
         )
         await db.commit()
         return cursor.rowcount > 0
+
+
+async def set_user_discount_promo(user_id: int, promo_id: int, discount_percent: int) -> bool:
+    """Сохранить активный скидочный промокод для пользователя."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN active_promo_id INTEGER DEFAULT NULL")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN active_discount INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        await db.execute(
+            "UPDATE users SET active_promo_id = ?, active_discount = ? WHERE user_id = ?",
+            (promo_id, discount_percent, user_id),
+        )
+        await db.commit()
+        return True
+
+
+async def get_user_discount(user_id: int) -> tuple[int | None, int]:
+    """Получить активную скидку пользователя. Возвращает (promo_id, discount_percent)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT active_promo_id, active_discount FROM users WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        if row and row["active_promo_id"]:
+            return row["active_promo_id"], row["active_discount"] or 0
+        return None, 0
+
+
+async def clear_user_discount(user_id: int) -> None:
+    """Очистить активную скидку после использования."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET active_promo_id = NULL, active_discount = 0 WHERE user_id = ?",
+            (user_id,),
+        )
+        await db.commit()
