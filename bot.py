@@ -567,7 +567,10 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
     await callback.message.answer(
         f"🌍 <b>Выберите сервер</b>\n\n"
         f"Тариф: <b>{plan['name']}</b>\n\n"
-        "Выберите локацию для подключения:",
+        "🟢 — свободно\n"
+        "🟡 — средняя загрузка\n"
+        "🔴 — высокая загрузка\n\n"
+        "Выберите локацию:",
         reply_markup=servers_kb(servers, plan_key),
     )
     await callback.answer()
