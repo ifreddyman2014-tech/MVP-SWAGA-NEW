@@ -267,7 +267,38 @@ async def cb_contact_operator(callback: types.CallbackQuery) -> None:
 
 @dp.message_handler(content_types=types.ContentTypes.ANY)
 async def forward_to_operator(message: types.Message) -> None:
-    """Пересылка сообщений оператору."""
+    """Пересылка сообщений оператору и ответы от оператора."""
+    # Если сообщение от оператора — это ответ пользователю
+    if OPERATOR_CHAT_ID and str(message.from_user.id) == str(OPERATOR_CHAT_ID):
+        # Проверяем, что это reply на пересланное сообщение
+        if message.reply_to_message and message.reply_to_message.forward_from:
+            user_id = message.reply_to_message.forward_from.id
+            try:
+                # Отправляем ответ пользователю
+                await bot.send_message(
+                    user_id,
+                    f"💬 <b>Ответ оператора:</b>\n\n{message.text or '(медиа)'}",
+                )
+                await message.reply("✅ Ответ отправлен пользователю")
+            except Exception as e:
+                await message.reply(f"❌ Не удалось отправить: {e}")
+            return
+        # Если это reply на info-сообщение с ID пользователя
+        elif message.reply_to_message and message.reply_to_message.text:
+            import re
+            match = re.search(r'ID:\s*(\d+)', message.reply_to_message.text)
+            if match:
+                user_id = int(match.group(1))
+                try:
+                    await bot.send_message(
+                        user_id,
+                        f"💬 <b>Ответ оператора:</b>\n\n{message.text or '(медиа)'}",
+                    )
+                    await message.reply("✅ Ответ отправлен пользователю")
+                except Exception as e:
+                    await message.reply(f"❌ Не удалось отправить: {e}")
+                return
+
     if not OPERATOR_CHAT_ID:
         await message.answer(
             "✅ Ваше сообщение получено!\n"
@@ -283,6 +314,7 @@ async def forward_to_operator(message: types.Message) -> None:
         user_info += f"От: @{user.username}\n" if user.username else f"От: {user.full_name}\n"
         user_info += f"ID: <code>{user.id}</code>\n"
         user_info += "─" * 20
+        user_info += "\n\n💡 <i>Ответьте reply на это сообщение</i>"
 
         await bot.send_message(OPERATOR_CHAT_ID, user_info)
         await message.forward(OPERATOR_CHAT_ID)
