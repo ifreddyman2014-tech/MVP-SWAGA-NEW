@@ -779,7 +779,14 @@ async def _create_subscription_on_server(
         new_uuid = generate_uuid()
         sub_id = generate_sub_id()
         email = f"tg_{user_id}_{int(now.timestamp())}"
-        end = now + timedelta(days=plan["days"])
+
+        # Суммируем дни с существующей подпиской (даже при смене сервера)
+        if existing_sub and existing_sub.get("end_date"):
+            current_end = datetime.fromisoformat(existing_sub["end_date"])
+            base_date = max(current_end, now)
+        else:
+            base_date = now
+        end = base_date + timedelta(days=plan["days"])
         expiry_ms = int(end.timestamp() * 1000)  # 3X-UI использует миллисекунды
 
         try:
@@ -1226,7 +1233,14 @@ async def handle_payment_success(
             server = server_manager.get_best_server()
 
         use_default = server is None
-        end = now + timedelta(days=plan["days"])
+
+        # Суммируем дни с существующей подпиской (даже при смене сервера)
+        if existing_sub and existing_sub.get("end_date"):
+            current_end = datetime.fromisoformat(existing_sub["end_date"])
+            base_date = max(current_end, now)
+        else:
+            base_date = now
+        end = base_date + timedelta(days=plan["days"])
         expiry_ms = int(end.timestamp() * 1000)  # 3X-UI использует миллисекунды
 
         new_uuid = generate_uuid()
