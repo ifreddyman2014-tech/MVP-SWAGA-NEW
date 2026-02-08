@@ -15,14 +15,14 @@
       "priority": 10,
       "enabled": true,
       "location": "DE",
-      "transport": "",
-      "transport_path": "",
-      "transport_host": "",
-      "xhttp_mode": "",
-      "reality_pbk": "",
-      "reality_sid": "",
-      "reality_sni": "",
-      "reality_fp": ""
+      "transport": "xhttp",
+      "transport_path": "/adv",
+      "transport_host": "yandex.ru",
+      "xhttp_mode": "packet-up",
+      "reality_pbk": "9J1AXF06NYExtH0siVBABHH7IQcnzLMZOWgJIJ4_QA4",
+      "reality_sid": "d425791dd44d31",
+      "reality_sni": "web.de",
+      "reality_fp": "chrome"
     },
     {
       "id": "lv1",
