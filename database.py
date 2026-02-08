@@ -471,6 +471,84 @@ async def update_sub_server(sub_id: int, new_server_id: str, new_uuid: str, new_
         return True
 
 
+# ── Migration History (для безопасной очистки после failover) ─────────────────
+
+async def init_migration_table() -> None:
+    """Создать таблицу истории миграций."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS migration_history (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                sub_id          INTEGER NOT NULL,
+                user_id         INTEGER NOT NULL,
+                old_server_id   TEXT    NOT NULL,
+                old_uuid        TEXT    NOT NULL,
+                old_email       TEXT    NOT NULL,
+                new_server_id   TEXT    NOT NULL,
+                new_uuid        TEXT    NOT NULL,
+                migrated_at     TEXT    NOT NULL,
+                cleaned_up      INTEGER DEFAULT 0,
+                cleaned_at      TEXT    DEFAULT NULL,
+                FOREIGN KEY (sub_id) REFERENCES subscriptions(sub_id)
+            )
+        """)
+        await db.commit()
+
+
+async def save_migration(
+    sub_id: int,
+    user_id: int,
+    old_server_id: str,
+    old_uuid: str,
+    old_email: str,
+    new_server_id: str,
+    new_uuid: str,
+) -> bool:
+    """Сохранить запись о миграции для последующей очистки."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            await db.execute(
+                """INSERT INTO migration_history
+                   (sub_id, user_id, old_server_id, old_uuid, old_email, new_server_id, new_uuid, migrated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (sub_id, user_id, old_server_id, old_uuid, old_email,
+                 new_server_id, new_uuid, datetime.utcnow().isoformat()),
+            )
+            await db.commit()
+            return True
+        except Exception:
+            return False
+
+
+async def get_pending_cleanups(server_id: str) -> list[dict]:
+    """
+    Получить список клиентов для удаления на восстановленном сервере.
+    Возвращает только записи, которые ещё не очищены (cleaned_up = 0).
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """SELECT * FROM migration_history
+               WHERE old_server_id = ? AND cleaned_up = 0""",
+            (server_id,),
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def mark_cleanup_done(migration_id: int) -> bool:
+    """Отметить запись миграции как очищенную."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """UPDATE migration_history
+               SET cleaned_up = 1, cleaned_at = ?
+               WHERE id = ?""",
+            (datetime.utcnow().isoformat(), migration_id),
+        )
+        await db.commit()
+        return True
+
+
 # ── Payments (YooKassa) ───────────────────────────────────────────────────────
 
 async def create_payment(

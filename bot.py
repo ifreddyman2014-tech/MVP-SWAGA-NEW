@@ -52,6 +52,10 @@ from database import (
     clear_user_discount,
     get_subs_by_server,
     update_sub_server,
+    init_migration_table,
+    save_migration,
+    get_pending_cleanups,
+    mark_cleanup_done,
 )
 from xui_api import XUIAPI
 from yookassa_payment import create_payment as yookassa_create_payment
@@ -1445,6 +1449,17 @@ async def _migrate_user_to_server(sub: dict, new_server) -> bool:
             logger.error("Не удалось создать клиента на сервере %s", new_server.name)
             return False
 
+        # Сохраняем историю миграции (для последующей безопасной очистки)
+        await save_migration(
+            sub_id=sub["sub_id"],
+            user_id=user_id,
+            old_server_id=sub["server_id"],
+            old_uuid=old_uuid,
+            old_email=sub.get("xui_email", ""),
+            new_server_id=new_server.id,
+            new_uuid=new_uuid,
+        )
+
         # Обновляем подписку в БД
         await update_sub_server(sub["sub_id"], new_server.id, new_uuid, new_email, new_sub_id)
 
@@ -1488,15 +1503,78 @@ async def _migrate_user_to_server(sub: dict, new_server) -> bool:
         return False
 
 
+async def _cleanup_old_clients(server) -> int:
+    """
+    Удалить старых клиентов с восстановленного сервера.
+    Удаляет ТОЛЬКО клиентов из таблицы migration_history.
+    Возвращает количество удалённых.
+    """
+    pending = await get_pending_cleanups(server.id)
+    if not pending:
+        return 0
+
+    from xui_api import XUIAPI
+    server_xui = XUIAPI()
+
+    # Определяем протокол
+    if server.xui_host not in ("127.0.0.1", "localhost"):
+        protocol = "https"
+    elif server.xui_port in (443, 2053, 2096):
+        protocol = "https"
+    else:
+        protocol = "http"
+    server_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+
+    # Логинимся
+    try:
+        login_resp = server_xui.session.post(
+            f"{server_xui.base_url}/login",
+            json={"username": server.xui_username, "password": server.xui_password},
+            verify=False, timeout=10,
+        )
+        if not login_resp.json().get("success"):
+            logger.error("Не удалось авторизоваться для очистки на %s", server.name)
+            return 0
+        server_xui._logged_in = True
+    except Exception as e:
+        logger.error("Ошибка авторизации для очистки: %s", e)
+        return 0
+
+    cleaned = 0
+    for migration in pending:
+        try:
+            # Удаляем старого клиента по UUID
+            success = server_xui.delete_client(server.inbound_id, migration["old_uuid"])
+            if success:
+                await mark_cleanup_done(migration["id"])
+                cleaned += 1
+                logger.info(
+                    "Очищен старый клиент %s с сервера %s",
+                    migration["old_email"], server.name
+                )
+            else:
+                # Клиент уже удалён или не существует — тоже отмечаем как очищено
+                await mark_cleanup_done(migration["id"])
+                cleaned += 1
+        except Exception as e:
+            logger.warning("Ошибка удаления клиента %s: %s", migration["old_uuid"], e)
+            # Не отмечаем как очищенный, попробуем в следующий раз
+
+    return cleaned
+
+
 async def _scheduler_server_failover() -> None:
     """
     Проверка серверов каждые 2 минуты.
     При падении сервера — переключение пользователей на здоровый.
+    При восстановлении — очистка старых клиентов.
     """
     await asyncio.sleep(120)  # Ждём 2 минуты при старте
 
     # Отслеживаем количество последовательных ошибок для каждого сервера
     server_fail_count: dict[str, int] = {}
+    # Отслеживаем серверы, которые были "упавшими" (для очистки при восстановлении)
+    servers_was_down: set[str] = set()
     FAIL_THRESHOLD = 3  # Сколько ошибок подряд = сервер упал
 
     while True:
@@ -1515,7 +1593,23 @@ async def _scheduler_server_failover() -> None:
 
                 if is_healthy:
                     # Сбрасываем счётчик ошибок
+                    prev_fail_count = server_fail_count.get(server_id, 0)
                     server_fail_count[server_id] = 0
+
+                    # Если сервер восстановился после падения — очищаем старых клиентов
+                    if server_id in servers_was_down:
+                        servers_was_down.remove(server_id)
+                        cleaned = await _cleanup_old_clients(server)
+                        if cleaned > 0:
+                            await notify_admins(
+                                f"🧹 <b>Очистка завершена</b>\n\n"
+                                f"Сервер <b>{server.name}</b> восстановлен.\n"
+                                f"Удалено старых клиентов: {cleaned}"
+                            )
+                            logger.info(
+                                "Сервер %s восстановлен, очищено %d старых клиентов",
+                                server.name, cleaned
+                            )
                 else:
                     # Увеличиваем счётчик ошибок
                     server_fail_count[server_id] = server_fail_count.get(server_id, 0) + 1
@@ -1567,6 +1661,9 @@ async def _scheduler_server_failover() -> None:
                             f"Мигрировано: {migrated}/{len(subs)} пользователей\n"
                             f"Новый сервер: <b>{target_server.name}</b>"
                         )
+
+                        # Запоминаем, что этот сервер требует очистки при восстановлении
+                        servers_was_down.add(server_id)
 
         except Exception as e:
             logger.error("Ошибка в scheduler_failover: %s", e)
@@ -1884,6 +1981,7 @@ async def on_startup(_dp: Dispatcher) -> None:
     """Инициализация при запуске бота."""
     await init_db()
     await init_promo_table()
+    await init_migration_table()
     logger.info("База данных инициализирована")
 
     # Установка callback для обработки успешных платежей
