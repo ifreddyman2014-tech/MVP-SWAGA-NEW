@@ -256,7 +256,6 @@ async def contact_operator_btn(message: types.Message) -> None:
         "Опишите вашу проблему в следующем сообщении.\n"
         "Оператор ответит в ближайшее время.\n\n"
         "📝 <i>Укажите:</i>\n"
-        "• Ваш username в Telegram\n"
         "• Суть проблемы\n"
         "• Скриншот (если есть)",
     )
@@ -270,7 +269,6 @@ async def cb_contact_operator(callback: types.CallbackQuery) -> None:
         "Опишите вашу проблему в следующем сообщении.\n"
         "Оператор ответит в ближайшее время.\n\n"
         "📝 <i>Укажите:</i>\n"
-        "• Ваш username в Telegram\n"
         "• Суть проблемы\n"
         "• Скриншот (если есть)",
     )
