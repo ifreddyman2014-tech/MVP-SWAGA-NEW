@@ -185,15 +185,27 @@ def operator_kb() -> types.InlineKeyboardMarkup:
 
 # ── Обработчики ───────────────────────────────────────────────────────────────
 
+LOGO_PATH = "/root/MVP-SWAGA-NEW/media/support_logo.png"
+
+
 @dp.message_handler(commands=["start"])
 async def cmd_start(message: types.Message) -> None:
-    """Приветствие."""
-    await message.answer(
+    """Приветствие с логотипом."""
+    import os
+    caption = (
         "👋 <b>Добро пожаловать в поддержку SWAGA VPN!</b>\n\n"
         "Выберите тему вопроса из меню ниже.\n"
-        "Если не нашли ответ — напишите оператору.",
-        reply_markup=main_menu_kb(),
+        "Если не нашли ответ — напишите оператору."
     )
+    if os.path.exists(LOGO_PATH):
+        with open(LOGO_PATH, "rb") as photo:
+            await message.answer_photo(
+                photo,
+                caption=caption,
+                reply_markup=main_menu_kb(),
+            )
+    else:
+        await message.answer(caption, reply_markup=main_menu_kb())
 
 
 @dp.callback_query_handler(lambda c: c.data == "main_menu")
