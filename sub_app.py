@@ -76,6 +76,17 @@ def get_server_config(server_id: str) -> dict:
     }
 
 
+@routes.get("/health")
+async def handle_health(request: web.Request) -> web.Response:
+    """Health check endpoint for monitoring."""
+    return web.Response(
+        text="OK",
+        content_type="text/plain",
+        status=200,
+        headers={"X-Service": "SWAGA-VPN-Subscription-Server"}
+    )
+
+
 @routes.get("/sub/{sub_id}")
 async def handle_subscription(request: web.Request) -> web.Response:
     """Return base64-encoded VLESS links for all enabled servers."""
