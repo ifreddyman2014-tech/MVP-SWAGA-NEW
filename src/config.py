@@ -53,6 +53,24 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = Field("INFO", description="Logging level")
 
+    @field_validator("admin_chat_id", mode="before")
+    @classmethod
+    def validate_admin_chat_id(cls, v) -> Optional[int]:
+        """Convert placeholder or invalid values to None."""
+        if v is None:
+            return None
+        if isinstance(v, int):
+            return v
+        if isinstance(v, str):
+            v = v.strip()
+            if v.startswith("REPLACE_") or not v:
+                return None
+            try:
+                return int(v)
+            except ValueError:
+                return None
+        return None
+
     @field_validator("xui_base")
     @classmethod
     def validate_xui_base(cls, v: str) -> str:

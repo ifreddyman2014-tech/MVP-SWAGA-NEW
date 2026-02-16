@@ -1,8 +1,14 @@
 # Bot Framework (aiogram v2)
 aiogram==2.25.2
 
+# SQLAlchemy 2.0 (async ORM)
+sqlalchemy[asyncio]==2.0.36
+
 # Async SQLite
 aiosqlite==0.20.0
+
+# Async PostgreSQL
+asyncpg==0.30.0
 
 # HTTP Client (for 3X-UI API)
 requests==2.32.3
@@ -10,3 +16,7 @@ urllib3==2.2.3
 
 # Environment
 python-dotenv==1.0.1
+
+# Settings Management
+pydantic==2.10.6
+pydantic-settings==2.8.1
