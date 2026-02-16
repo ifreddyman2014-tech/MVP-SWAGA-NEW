@@ -89,6 +89,7 @@ class Server(Base):
     flow: Mapped[str] = mapped_column(String(50), default="xtls-rprx-vision", nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(50), default="chrome", nullable=False)
     spider_x: Mapped[str] = mapped_column(String(255), default="/", nullable=False)
+    location: Mapped[str] = mapped_column(String(10), default="", nullable=False)  # Country code (e.g., "FI", "DE")
 
     # xhttp specific
     xhttp_host: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

@@ -179,16 +179,22 @@ def format_date(dt: datetime) -> str:
 
 def build_vless_link(uuid: str, server: Server) -> str:
     """Build VLESS deep link for a server."""
+    # Validate required fields - use defaults if empty or whitespace
+    network_type = (server.network_type or "").strip() or "xhttp"
+    security = (server.security or "").strip() or "reality"
+    flow = (server.flow or "").strip() or "xtls-rprx-vision"
+    fingerprint = (server.fingerprint or "").strip() or "chrome"
+
     params = {
         "encryption": "none",
-        "security": server.security,
-        "type": server.network_type,
+        "security": security,
+        "type": network_type,
         "pbk": server.public_key,
-        "fp": server.fingerprint,
+        "fp": fingerprint,
         "sni": server.domain,
         "sid": server.get_first_short_id(),
         "spx": server.spider_x,
-        "flow": server.flow,
+        "flow": flow,
     }
 
     if server.xhttp_host:

@@ -44,6 +44,9 @@ def build_vless_link(
     flow: str = "",
 ) -> str:
     """Сформировать VLESS Reality ссылку для подключения (TCP или xHTTP)."""
+    # Validate transport - use default if empty or whitespace
+    transport = (transport or "").strip() or "xhttp"
+
     enc_spx = quote(reality_spx, safe="")
     enc_remark = quote(remark, safe="")
 
