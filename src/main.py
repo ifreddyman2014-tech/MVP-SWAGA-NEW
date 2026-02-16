@@ -145,8 +145,8 @@ async def yookassa_webhook(
             logger.warning("Invalid webhook signature")
             raise HTTPException(status_code=403, detail="Invalid signature")
 
-        # Process webhook
-        await payment_service.handle_webhook(event_data, session)
+        # Process webhook (pass bot instance for notifications)
+        await payment_service.handle_webhook(event_data, session, bot)
 
         return {"status": "ok"}
 

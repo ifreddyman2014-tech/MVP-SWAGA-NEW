@@ -293,6 +293,112 @@ async def generate_keys_for_subscription(
     return vless_links
 
 
+async def send_all_servers_message(
+    user: User,
+    subscription: Subscription,
+    session: AsyncSession,
+    message_or_bot,
+    success_text: str,
+) -> None:
+    """
+    Send message with all server keys to user.
+
+    Args:
+        user: User object
+        subscription: Subscription object
+        session: Database session
+        message_or_bot: Message object or Bot instance
+        success_text: Initial success message text
+    """
+    # Get all keys with servers
+    result = await session.execute(
+        select(Key, Server)
+        .join(Server, Key.server_id == Server.id)
+        .where(Key.subscription_id == subscription.id)
+        .where(Server.is_active == True)
+    )
+    keys_servers = result.all()
+
+    if not keys_servers:
+        # Check if message_or_bot is a Message or Bot
+        if hasattr(message_or_bot, 'answer'):
+            await message_or_bot.answer(
+                "❌ <b>Ключи не найдены</b>\n\nОбратись в поддержку.",
+                reply_markup=Keyboards.support_menu(),
+            )
+        else:
+            await message_or_bot.send_message(
+                user.telegram_id,
+                "❌ <b>Ключи не найдены</b>\n\nОбратись в поддержку.",
+                reply_markup=Keyboards.support_menu(),
+            )
+        return
+
+    # Build VLESS links with server info
+    vless_links = []
+    servers_info = []
+
+    # Location emojis
+    location_flags = {
+        "FI": "🇫🇮",
+        "DE": "🇩🇪",
+        "LV": "🇱🇻",
+        "NL": "🇳🇱",
+        "US": "🇺🇸",
+        "GB": "🇬🇧",
+    }
+
+    for key, server in keys_servers:
+        vless_link = build_vless_link(key.key_uuid, server)
+        vless_links.append(vless_link)
+
+        # Get location flag
+        flag = location_flags.get(server.location, "🌐")
+        if not flag or flag == "🌐":
+            # Fallback: try to detect from name
+            if "Финляндия" in server.name or "Finland" in server.name:
+                flag = "🇫🇮"
+            elif "Германия" in server.name or "Germany" in server.name:
+                flag = "🇩🇪"
+            elif "Латвия" in server.name or "Latvia" in server.name:
+                flag = "🇱🇻"
+
+        servers_info.append(f"{flag} <b>{server.name}</b>\n<code>{vless_link}</code>")
+
+    # Build deeplink (use first server)
+    deeplink = build_v2raytun_deeplink(vless_links[0])
+
+    # Format message
+    expiry_str = format_date(subscription.expiry_date)
+    days_left = max((subscription.expiry_date - datetime.utcnow()).days, 0)
+
+    servers_text = "\n\n".join(servers_info)
+    server_count = len(keys_servers)
+
+    text = (
+        f"{success_text}\n\n"
+        f"📅 Активно до: <b>{expiry_str}</b>\n"
+        f"⏱ Осталось: <b>{days_left} дн.</b>\n"
+        f"🌍 Доступно серверов: <b>{server_count}</b>\n\n"
+        f"{servers_text}\n\n"
+        f"<i>💡 Выбери любой сервер — все работают одновременно!</i>\n"
+        f"<i>Нажми кнопку ниже для быстрого подключения</i>"
+    )
+
+    # Send message using either Message or Bot instance
+    if hasattr(message_or_bot, 'answer'):
+        await message_or_bot.answer(
+            text,
+            reply_markup=Keyboards.success_kb(deeplink),
+        )
+    else:
+        await message_or_bot.send_message(
+            user.telegram_id,
+            text,
+            reply_markup=Keyboards.success_kb(deeplink),
+        )
+
+
 # ============== Command Handlers ==============
 
 @router.message(Command("start"))
@@ -582,21 +688,20 @@ async def trial_get(callback: CallbackQuery, session: AsyncSession):
 
     # Generate keys
     try:
-        vless_links = await generate_keys_for_subscription(user, subscription, expiry_date, session)
+        await generate_keys_for_subscription(user, subscription, expiry_date, session)
 
-        if not vless_links:
-            raise RuntimeError("No VLESS links generated")
+        # Send success message with all servers
+        success_text = (
+            f"🎁 <b>Твои {settings.trial_days} дня свободы активированы!</b>\n\n"
+            f"<i>Никаких настроек — всё работает из коробки.</i>"
+        )
 
-        # Build deeplink
-        deeplink = build_v2raytun_deeplink(vless_links[0])
-
-        # Send success message
-        await callback.message.answer(
-            TRIAL_SUCCESS_TEXT.format(
-                days=settings.trial_days,
-                expiry_date=format_date(expiry_date),
-            ),
-            reply_markup=Keyboards.success_kb(deeplink),
+        await send_all_servers_message(
+            user,
+            subscription,
+            session,
+            callback.message,
+            success_text,
         )
 
         logger.info(f"Trial activated for user {user.telegram_id}")

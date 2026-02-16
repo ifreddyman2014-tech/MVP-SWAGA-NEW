@@ -199,6 +199,7 @@ class YooKassaService:
         self,
         payment_id: str,
         session: AsyncSession,
+        bot=None,
     ) -> None:
         """
         Process successful payment and activate subscription.
@@ -206,6 +207,7 @@ class YooKassaService:
         Args:
             payment_id: YooKassa payment ID
             session: Database session
+            bot: Bot instance for sending notifications
 
         Raises:
             YooKassaError: On processing failure
@@ -296,6 +298,37 @@ class YooKassaService:
             f"Payment {payment_id} processed successfully. "
             f"User {user.telegram_id} subscription extended to {new_expiry}"
         )
+
+        # Send notification to user with all servers
+        if bot:
+            try:
+                from ..bot.handlers.user import send_all_servers_message
+
+                plan_names = {
+                    "m1": "1 месяц",
+                    "m3": "3 месяца",
+                    "m12": "12 месяцев",
+                }
+                plan_name = plan_names.get(payment.plan_type, payment.plan_type)
+
+                success_text = (
+                    f"💎 <b>Подписка активирована!</b>\n\n"
+                    f"📦 Тариф: <b>{plan_name}</b>\n\n"
+                    f"<i>YouTube 4K, Instagram, TikTok — всё летает.</i>"
+                )
+
+                await send_all_servers_message(
+                    user,
+                    subscription,
+                    session,
+                    bot,
+                    success_text,
+                )
+
+                logger.info(f"Payment notification sent to user {user.telegram_id}")
+            except Exception as e:
+                logger.error(f"Failed to send payment notification: {e}")
+                # Don't raise - payment already processed
 
     async def _sync_keys_to_servers(
         self,
@@ -407,6 +440,7 @@ class YooKassaService:
         self,
         event_data: Dict,
         session: AsyncSession,
+        bot=None,
     ) -> None:
         """
         Handle incoming YooKassa webhook.
@@ -414,6 +448,7 @@ class YooKassaService:
         Args:
             event_data: Webhook event data
             session: Database session
+            bot: Bot instance for sending notifications
         """
         event_type = event_data.get("event")
         payment_obj = event_data.get("object", {})
@@ -424,7 +459,7 @@ class YooKassaService:
 
         if event_type == "payment.succeeded" and status == "succeeded":
             try:
-                await self.process_successful_payment(payment_id, session)
+                await self.process_successful_payment(payment_id, session, bot)
             except Exception as e:
                 logger.error(f"Failed to process successful payment {payment_id}: {e}")
                 raise
