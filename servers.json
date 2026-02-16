@@ -71,6 +71,30 @@
       "reality_sid": "4527ed",
       "reality_sni": "www.focus.lv",
       "reality_fp": "chrome"
+    },
+    {
+      "id": "nl1",
+      "name": "Нидерланды",
+      "host": "188.127.247.137",
+      "xui_host": "188.127.247.137",
+      "xui_port": 15343,
+      "xui_web_path": "/sx1pJNsXTCTOldIKOq",
+      "xui_username": "NU0XH7Xpp0",
+      "xui_password": "guSnPgUPWa",
+      "vpn_port": 27934,
+      "inbound_id": 1,
+      "max_users": 150,
+      "priority": 15,
+      "enabled": true,
+      "location": "NL",
+      "transport": "xhttp",
+      "transport_path": "/adv",
+      "transport_host": "yandex.ru",
+      "xhttp_mode": "packet-up",
+      "reality_pbk": "_m6CDC7str9FmB-SiLJvI-saMZbvowQBRWGv0F7jORA",
+      "reality_sid": "d8a39b",
+      "reality_sni": "www.tesla.com",
+      "reality_fp": "chrome"
     }
   ]
 }
