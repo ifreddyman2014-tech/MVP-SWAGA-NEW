@@ -207,30 +207,68 @@ async def handle_cabinet(message: types.Message) -> None:
         await message.answer(NO_ACTIVE_SUB_TEXT, reply_markup=cabinet_kb())
         return
 
-    # Получаем настройки сервера из подписки
-    server_id = sub.get("server_id", "default")
+    # Получаем ВСЕ серверы и формируем конфиги для каждого
     from servers import server_manager
     if not server_manager.servers:
         server_manager.load_config()
 
-    srv = server_manager.get_server(server_id) if server_id and server_id != "default" else None
+    all_servers = server_manager.get_healthy_servers() if server_manager.servers else []
+    all_configs = []
 
-    if srv and srv.reality_pbk:
-        vless_link = build_vless_link(
-            uuid_str=sub["vless_uuid"],
-            host=srv.host,
-            port=srv.vpn_port,
-            transport=srv.transport or VPN_TRANSPORT,
-            path=srv.transport_path or VPN_PATH,
-            camouflage_host=srv.transport_host or VPN_CAMOUFLAGE_HOST,
-            xhttp_mode=srv.xhttp_mode or VPN_XHTTP_MODE,
-            reality_pbk=srv.reality_pbk,
-            reality_sid=srv.reality_sid,
-            reality_fp=srv.reality_fp or REALITY_FINGERPRINT,
-            reality_sni=srv.reality_sni,
-            reality_spx=REALITY_SPIDERX,
-        )
+    location_flags = {
+        "DE": "🇩🇪", "NL": "🇳🇱", "US": "🇺🇸", "FI": "🇫🇮",
+        "FR": "🇫🇷", "GB": "🇬🇧", "LV": "🇱🇻", "RU": "🇷🇺", "KZ": "🇰🇿",
+    }
+
+    location_names = {
+        "DE": "Germany", "NL": "Netherlands", "US": "USA", "FI": "Finland",
+        "FR": "France", "GB": "UK", "LV": "Latvia", "RU": "Russia", "KZ": "Kazakhstan",
+    }
+
+    # Формируем конфиги для ВСЕХ серверов
+    if all_servers:
+        for server in all_servers:
+            if server.reality_pbk:
+                vless_link = build_vless_link(
+                    uuid_str=sub["vless_uuid"],
+                    host=server.host,
+                    port=server.vpn_port,
+                    transport=server.transport or VPN_TRANSPORT,
+                    path=server.transport_path or VPN_PATH,
+                    camouflage_host=server.transport_host or VPN_CAMOUFLAGE_HOST,
+                    xhttp_mode=server.xhttp_mode or VPN_XHTTP_MODE,
+                    reality_pbk=server.reality_pbk,
+                    reality_sid=server.reality_sid,
+                    reality_fp=server.reality_fp or REALITY_FINGERPRINT,
+                    reality_sni=server.reality_sni,
+                    reality_spx=REALITY_SPIDERX,
+                    remark=f"SWAGA {location_names.get(server.location, server.location or '')}".strip() or server.name,
+                )
+            else:
+                vless_link = build_vless_link(
+                    uuid_str=sub["vless_uuid"],
+                    host=server.host,
+                    port=server.vpn_port,
+                    transport=VPN_TRANSPORT,
+                    path=VPN_PATH,
+                    camouflage_host=VPN_CAMOUFLAGE_HOST,
+                    xhttp_mode=VPN_XHTTP_MODE,
+                    reality_pbk=REALITY_PUBLIC_KEY,
+                    reality_sid=REALITY_SHORT_ID,
+                    reality_fp=REALITY_FINGERPRINT,
+                    reality_sni=REALITY_SNI,
+                    reality_spx=REALITY_SPIDERX,
+                    remark=f"SWAGA {location_names.get(server.location, server.location or '')}".strip() or server.name,
+                )
+
+            flag = location_flags.get(server.location, "🌐")
+            all_configs.append({
+                "name": server.name,
+                "flag": flag,
+                "link": vless_link
+            })
     else:
+        # Fallback на дефолтный сервер
         vless_link = build_vless_link(
             uuid_str=sub["vless_uuid"],
             host=VPN_HOST,
@@ -245,20 +283,38 @@ async def handle_cabinet(message: types.Message) -> None:
             reality_sni=REALITY_SNI,
             reality_spx=REALITY_SPIDERX,
         )
+        all_configs.append({
+            "name": "SWAGA VPN",
+            "flag": "🌐",
+            "link": vless_link
+        })
 
     plan_name = PLANS.get(sub["plan"], {}).get("name", sub["plan"])
     end_date = format_date(sub["end_date"])
+
+    # Подсчет оставшихся дней
+    from datetime import datetime
+    end_dt = datetime.fromisoformat(sub["end_date"]) if isinstance(sub["end_date"], str) else sub["end_date"]
+    days_left = max((end_dt - datetime.utcnow()).days, 0)
 
     cab_sub_id = sub.get("xui_sub_id", "")
     connect_base = SUB_BASE_URL.replace("/sub/", "/connect/")
     cab_sub_url = f"{connect_base}{cab_sub_id}" if cab_sub_id else ""
 
+    # Формируем список всех конфигов
+    configs_text = "\n\n".join([
+        f"{cfg['flag']} <b>{cfg['name']}</b>\n<code>{cfg['link']}</code>"
+        for cfg in all_configs
+    ])
+
     text = (
         "👤 <b>Личный кабинет</b>\n\n"
         f"📦 Тариф: <b>{plan_name}</b>\n"
-        f"📅 Активна до: <b>{end_date}</b>\n\n"
-        f"🔑 <b>Ваш конфиг (нажмите чтобы скопировать):</b>\n"
-        f"<code>{vless_link}</code>\n\n"
+        f"📅 Активна до: <b>{end_date}</b>\n"
+        f"⏱ Осталось: <b>{days_left} дн.</b>\n"
+        f"🌍 Доступно серверов: <b>{len(all_configs)}</b>\n\n"
+        f"{configs_text}\n\n"
+        f"<i>💡 Выбери любой сервер — все работают одновременно!</i>\n"
         "📲 Нажмите на кнопку ниже для быстрого подключения."
     )
     if cab_sub_url:
@@ -850,17 +906,9 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
         await _create_subscription_on_server(callback, plan_key, servers[0].id)
         return
 
-    # Показываем выбор сервера
-    await callback.message.answer(
-        f"🌍 <b>Выберите сервер</b>\n\n"
-        f"Тариф: <b>{plan['name']}</b>\n\n"
-        "🟢 — свободно\n"
-        "🟡 — средняя загрузка\n"
-        "🔴 — высокая загрузка\n\n"
-        "Выберите локацию:",
-        reply_markup=servers_kb(servers, plan_key),
-    )
+    # Сразу создаем подписку без выбора сервера (автоматический выбор лучшего)
     await callback.answer()
+    await _create_subscription_on_server(callback, plan_key, None)
 
 
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("server_"))
@@ -1209,20 +1257,143 @@ async def _create_subscription_on_server(
     connect_base = SUB_BASE_URL.replace("/sub/", "/connect/")
     sub_url = f"{connect_base}{sub_id}"
 
+    # ── Создаем ключи на ВСЕХ серверах ────────────────────────────────────
+    all_servers = server_manager.get_healthy_servers() if server_manager.servers else []
+    all_configs = []
+
+    # Добавляем текущий сервер/конфиг
+    location_flags = {
+        "DE": "🇩🇪", "NL": "🇳🇱", "US": "🇺🇸", "FI": "🇫🇮",
+        "FR": "🇫🇷", "GB": "🇬🇧", "LV": "🇱🇻", "RU": "🇷🇺", "KZ": "🇰🇿",
+    }
+
+    if srv:
+        flag = location_flags.get(srv.location, "🌐")
+        all_configs.append({
+            "name": srv.name,
+            "flag": flag,
+            "link": vless_link,
+            "server_id": actual_server_id
+        })
+    else:
+        all_configs.append({
+            "name": "SWAGA VPN",
+            "flag": "🌐",
+            "link": vless_link,
+            "server_id": "default"
+        })
+
+    # Создаем ключи на остальных серверах
+    for server in all_servers:
+        # Пропускаем текущий сервер
+        if server.id == actual_server_id:
+            continue
+
+        try:
+            from xui_api import XUIAPI
+            server_xui = XUIAPI()
+
+            # Определяем протокол
+            if server.xui_host not in ("127.0.0.1", "localhost"):
+                protocol = "https"
+            elif server.xui_port in (443, 2053, 2083, 2096, 8443):
+                protocol = "https"
+            else:
+                protocol = "http"
+
+            server_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+
+            # Авторизуемся
+            login_resp = server_xui.session.post(
+                f"{server_xui.base_url}/login",
+                json={"username": server.xui_username, "password": server.xui_password},
+                verify=False, timeout=10,
+            )
+
+            if login_resp.json().get("success"):
+                server_xui._logged_in = True
+
+                # Используем тот же UUID что и на первом сервере
+                server_xui.add_client(
+                    server.inbound_id, new_uuid, email,
+                    sub_id=sub_id, expiry_time=expiry_ms
+                )
+
+                # Формируем VLESS ссылку для этого сервера
+                loc_name = location_names.get(server.location, server.location or "")
+                server_remark = f"SWAGA {loc_name}".strip() if loc_name else server.name
+
+                if server.reality_pbk:
+                    server_vless_link = build_vless_link(
+                        uuid_str=new_uuid,
+                        host=server.host,
+                        port=server.vpn_port,
+                        transport=server.transport or VPN_TRANSPORT,
+                        path=server.transport_path or VPN_PATH,
+                        camouflage_host=server.transport_host or VPN_CAMOUFLAGE_HOST,
+                        xhttp_mode=server.xhttp_mode or VPN_XHTTP_MODE,
+                        reality_pbk=server.reality_pbk,
+                        reality_sid=server.reality_sid,
+                        reality_fp=server.reality_fp or REALITY_FINGERPRINT,
+                        reality_sni=server.reality_sni,
+                        reality_spx=REALITY_SPIDERX,
+                        remark=server_remark,
+                    )
+                else:
+                    server_vless_link = build_vless_link(
+                        uuid_str=new_uuid,
+                        host=server.host,
+                        port=server.vpn_port,
+                        transport=VPN_TRANSPORT,
+                        path=VPN_PATH,
+                        camouflage_host=VPN_CAMOUFLAGE_HOST,
+                        xhttp_mode=VPN_XHTTP_MODE,
+                        reality_pbk=REALITY_PUBLIC_KEY,
+                        reality_sid=REALITY_SHORT_ID,
+                        reality_fp=REALITY_FINGERPRINT,
+                        reality_sni=REALITY_SNI,
+                        reality_spx=REALITY_SPIDERX,
+                        remark=server_remark,
+                    )
+
+                flag = location_flags.get(server.location, "🌐")
+                all_configs.append({
+                    "name": server.name,
+                    "flag": flag,
+                    "link": server_vless_link,
+                    "server_id": server.id
+                })
+
+                logger.info(f"Создан ключ на сервере {server.name} для пользователя {user_id}")
+
+        except Exception as e:
+            logger.error(f"Не удалось создать ключ на сервере {server.name}: {e}")
+            # Продолжаем, даже если не удалось создать на этом сервере
+
+    # ── Формируем сообщение со ВСЕМИ серверами ────────────────────────────
     # Разный текст для продления и новой подписки
     if is_extension:
         action_text = "✅ <b>Подписка продлена!</b>"
     else:
         action_text = "✅ <b>Подписка активирована!</b>"
 
+    # Формируем список всех конфигов
+    configs_text = "\n\n".join([
+        f"{cfg['flag']} <b>{cfg['name']}</b>\n<code>{cfg['link']}</code>"
+        for cfg in all_configs
+    ])
+
+    days_left = max((end - datetime.utcnow()).days, 0)
+
     text = (
         f"{action_text}\n\n"
         f"📦 Тариф: <b>{plan['name']}</b>\n"
-        f"📅 Действует до: <b>{format_date(end)}</b>"
-        f"{server_info}"
+        f"📅 Действует до: <b>{format_date(end)}</b>\n"
+        f"⏱ Осталось: <b>{days_left} дн.</b>\n"
+        f"🌍 Доступно серверов: <b>{len(all_configs)}</b>"
         f"{referral_bonus_text}\n\n"
-        f"🔑 <b>Ваш конфиг (нажмите чтобы скопировать):</b>\n"
-        f"<code>{vless_link}</code>\n\n"
+        f"{configs_text}\n\n"
+        f"<i>💡 Выбери любой сервер — все работают одновременно!</i>\n"
         "📲 Нажмите на кнопку ниже для быстрого подключения."
     )
     await callback.message.answer(text, reply_markup=quick_connect_kb(sub_url))
