@@ -2,6 +2,54 @@
 
 Complete step-by-step deployment instructions for production.
 
+---
+
+## 🚀 БЫСТРОЕ ОБНОВЛЕНИЕ (для существующего сервера)
+
+Если у вас уже запущен бот и нужно только обновить код с новыми зависимостями:
+
+### На production сервере выполните:
+
+```bash
+cd /root/MVP-SWAGA-NEW
+
+# 1. Остановить бота (если запущен)
+pkill -f "python.*main.py" || pkill -f "python.*bot.py"
+# или для Docker:
+# docker-compose stop vpn-bot
+
+# 2. Получить обновления
+git fetch origin
+git checkout claude/check-status-bH5rv
+git pull origin claude/check-status-bH5rv
+
+# 3. Установить новые зависимости
+pip3 install -r requirements.txt
+
+# 4. Синхронизировать серверы
+python3 sync_servers.py --dry-run  # предпросмотр
+python3 sync_servers.py            # применить
+python3 sync_servers.py --list     # проверить
+
+# 5. Запустить бота
+# Для прямого запуска:
+nohup python3 main.py > bot.log 2>&1 &
+
+# Для Docker:
+# docker-compose up -d
+
+# 6. Проверить логи
+tail -f bot.log
+# или: docker-compose logs -f vpn-bot
+```
+
+### Что изменилось:
+- ✅ Добавлены: SQLAlchemy, asyncpg, pydantic
+- ✅ Исправлена валидация config для placeholder значений
+- ✅ Теперь работает `sync_servers.py`
+
+---
+
 ## Pre-Deployment Checklist
 
 ### 1. Server Requirements
