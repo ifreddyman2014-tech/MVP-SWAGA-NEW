@@ -212,7 +212,8 @@ async def handle_cabinet(message: types.Message) -> None:
     if not server_manager.servers:
         server_manager.load_config()
 
-    all_servers = server_manager.get_healthy_servers() if server_manager.servers else []
+    # Используем ВСЕ enabled серверы, а не только healthy
+    all_servers = [s for s in server_manager.servers.values() if s.enabled] if server_manager.servers else []
     all_configs = []
 
     location_flags = {
@@ -1259,8 +1260,10 @@ async def _create_subscription_on_server(
     sub_url = f"{connect_base}{sub_id}"
 
     # ── Создаем ключи на ВСЕХ серверах ────────────────────────────────────
-    all_servers = server_manager.get_healthy_servers() if server_manager.servers else []
+    # Используем ВСЕ enabled серверы, а не только healthy (чтобы не зависеть от health check)
+    all_servers = [s for s in server_manager.servers.values() if s.enabled] if server_manager.servers else []
     all_configs = []
+    logger.info(f"Создание ключей для пользователя {user_id} на {len(all_servers)} серверах")
 
     # Добавляем текущий сервер/конфиг
     location_flags = {
@@ -1288,9 +1291,11 @@ async def _create_subscription_on_server(
     for server in all_servers:
         # Пропускаем текущий сервер
         if server.id == actual_server_id:
+            logger.debug(f"Пропуск сервера {server.name} (уже создан ключ)")
             continue
 
         try:
+            logger.info(f"Попытка создать ключ на сервере {server.name} ({server.id})")
             from xui_api import XUIAPI
             server_xui = XUIAPI()
 
@@ -1303,6 +1308,7 @@ async def _create_subscription_on_server(
                 protocol = "http"
 
             server_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+            logger.debug(f"API URL для {server.name}: {server_xui.base_url}")
 
             # Авторизуемся
             login_resp = server_xui.session.post(
@@ -1311,14 +1317,23 @@ async def _create_subscription_on_server(
                 verify=False, timeout=10,
             )
 
-            if login_resp.json().get("success"):
+            login_data = login_resp.json()
+            if login_data.get("success"):
                 server_xui._logged_in = True
+                logger.debug(f"Авторизация на {server.name} успешна")
+            else:
+                logger.error(f"Ошибка авторизации на {server.name}: {login_data.get('msg', 'Unknown error')}")
+                continue
+
+            if server_xui._logged_in:
 
                 # Используем тот же UUID что и на первом сервере
+                logger.debug(f"Добавление клиента на {server.name}: inbound_id={server.inbound_id}, uuid={new_uuid[:8]}...")
                 server_xui.add_client(
                     server.inbound_id, new_uuid, email,
                     sub_id=sub_id, expiry_time=expiry_ms
                 )
+                logger.info(f"✅ Клиент успешно добавлен на {server.name}")
 
                 # Формируем VLESS ссылку для этого сервера
                 loc_name = location_names.get(server.location, server.location or "")
@@ -1365,10 +1380,10 @@ async def _create_subscription_on_server(
                     "server_id": server.id
                 })
 
-                logger.info(f"Создан ключ на сервере {server.name} для пользователя {user_id}")
+                logger.info(f"✅ Создан ключ на сервере {server.name} для пользователя {user_id}")
 
         except Exception as e:
-            logger.error(f"Не удалось создать ключ на сервере {server.name}: {e}")
+            logger.error(f"❌ Не удалось создать ключ на сервере {server.name} ({server.id}): {e}", exc_info=True)
             # Продолжаем, даже если не удалось создать на этом сервере
 
     # ── Формируем сообщение со ВСЕМИ серверами ────────────────────────────
@@ -2163,6 +2178,10 @@ async def on_startup(_dp: Dispatcher) -> None:
         for srv_id, srv in server_manager.servers.items():
             status = "✅" if srv.enabled else "❌"
             logger.info("  %s %s (%s)", status, srv.name, srv_id)
+
+        # Запускаем health check для автоматической проверки серверов
+        server_manager.start_health_checks()
+        logger.info("Health check запущен для автоматической проверки серверов")
     else:
         logger.error("❌ Не удалось загрузить конфигурацию серверов!")
 
