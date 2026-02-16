@@ -2155,6 +2155,16 @@ async def on_startup(_dp: Dispatcher) -> None:
     await init_migration_table()
     logger.info("База данных инициализирована")
 
+    # Загрузка конфигурации серверов
+    from servers import server_manager
+    if server_manager.load_config():
+        logger.info("Конфигурация серверов загружена: %d серверов", len(server_manager.servers))
+        for srv_id, srv in server_manager.servers.items():
+            status = "✅" if srv.enabled else "❌"
+            logger.info("  %s %s (%s)", status, srv.name, srv_id)
+    else:
+        logger.error("❌ Не удалось загрузить конфигурацию серверов!")
+
     # Установка callback для обработки успешных платежей
     set_payment_callback(handle_payment_success)
     logger.info("YooKassa callback установлен")
