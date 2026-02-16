@@ -76,7 +76,7 @@ def get_server_config(server_id: str) -> dict:
 
 @routes.get("/sub/{sub_id}")
 async def handle_subscription(request: web.Request) -> web.Response:
-    """Return base64-encoded VLESS link for the given subscription ID."""
+    """Return base64-encoded VLESS links for all enabled servers."""
     sub_id = request.match_info["sub_id"]
 
     sub = await get_sub_by_xui_id(sub_id)
@@ -86,32 +86,72 @@ async def handle_subscription(request: web.Request) -> web.Response:
     if not sub.get("is_active"):
         return web.Response(status=403, text="subscription expired")
 
-    # Получаем настройки сервера
-    server_id = sub.get("server_id", "")
-    cfg = get_server_config(server_id)
+    # Загружаем конфигурацию серверов если не загружена
+    if not server_manager.servers:
+        server_manager.load_config()
 
-    # Формируем название: 🇱🇻 SWAGA VPN - до DD.MM.YYYY
-    end_date_str = format_date(sub["end_date"]) if sub.get("end_date") else ""
-    flag = cfg["flag"]
-    remark = f"{flag} SWAGA VPN - до {end_date_str}" if end_date_str else f"{flag} SWAGA VPN"
+    # Получаем все включенные серверы
+    enabled_servers = [s for s in server_manager.get_all_servers() if s.enabled]
 
-    vless_link = build_vless_link(
-        uuid_str=sub["vless_uuid"],
-        host=cfg["host"],
-        port=cfg["port"],
-        transport=cfg["transport"],
-        path=cfg["path"],
-        camouflage_host=cfg["camouflage_host"],
-        xhttp_mode=cfg["xhttp_mode"],
-        reality_pbk=cfg["reality_pbk"],
-        reality_sid=cfg["reality_sid"],
-        reality_fp=cfg["reality_fp"],
-        reality_sni=cfg["reality_sni"],
-        reality_spx=REALITY_SPIDERX,
-        remark=remark,
-    )
+    if not enabled_servers:
+        # Fallback на дефолтный сервер если нет включенных
+        logger.warning("No enabled servers found, using default config")
+        server_id = sub.get("server_id", "")
+        cfg = get_server_config(server_id)
 
-    encoded = base64.b64encode(vless_link.encode()).decode()
+        end_date_str = format_date(sub["end_date"]) if sub.get("end_date") else ""
+        flag = cfg["flag"]
+        remark = f"{flag} SWAGA VPN - до {end_date_str}" if end_date_str else f"{flag} SWAGA VPN"
+
+        vless_link = build_vless_link(
+            uuid_str=sub["vless_uuid"],
+            host=cfg["host"],
+            port=cfg["port"],
+            transport=cfg["transport"],
+            path=cfg["path"],
+            camouflage_host=cfg["camouflage_host"],
+            xhttp_mode=cfg["xhttp_mode"],
+            reality_pbk=cfg["reality_pbk"],
+            reality_sid=cfg["reality_sid"],
+            reality_fp=cfg["reality_fp"],
+            reality_sni=cfg["reality_sni"],
+            reality_spx=REALITY_SPIDERX,
+            remark=remark,
+        )
+        encoded = base64.b64encode(vless_link.encode()).decode()
+    else:
+        # Генерируем VLESS ссылки для всех включенных серверов
+        vless_links = []
+        end_date_str = format_date(sub["end_date"]) if sub.get("end_date") else ""
+
+        for server in enabled_servers:
+            cfg = get_server_config(server.id)
+            flag = cfg["flag"]
+
+            # Формируем уникальное название для каждого сервера
+            server_name = server.name if hasattr(server, 'name') else server.location
+            remark = f"{flag} SWAGA {server_name} - до {end_date_str}" if end_date_str else f"{flag} SWAGA {server_name}"
+
+            vless_link = build_vless_link(
+                uuid_str=sub["vless_uuid"],
+                host=cfg["host"],
+                port=cfg["port"],
+                transport=cfg["transport"],
+                path=cfg["path"],
+                camouflage_host=cfg["camouflage_host"],
+                xhttp_mode=cfg["xhttp_mode"],
+                reality_pbk=cfg["reality_pbk"],
+                reality_sid=cfg["reality_sid"],
+                reality_fp=cfg["reality_fp"],
+                reality_sni=cfg["reality_sni"],
+                reality_spx=REALITY_SPIDERX,
+                remark=remark,
+            )
+            vless_links.append(vless_link)
+
+        # Объединяем все ссылки с переносом строки (стандарт для V2Ray подписок)
+        all_links = "\n".join(vless_links)
+        encoded = base64.b64encode(all_links.encode()).decode()
 
     # Вычисляем expire timestamp для V2RayTun
     expire_ts = 0
@@ -246,7 +286,7 @@ function copyConfig() {{
 
 @routes.get("/connect/{sub_id}")
 async def handle_connect(request: web.Request) -> web.Response:
-    """HTML page that auto-opens V2RayTun with the VLESS config."""
+    """HTML page that auto-opens V2RayTun with subscription URL containing all servers."""
     sub_id = request.match_info["sub_id"]
 
     sub = await get_sub_by_xui_id(sub_id)
@@ -256,35 +296,72 @@ async def handle_connect(request: web.Request) -> web.Response:
     if not sub.get("is_active"):
         return web.Response(status=403, text="subscription expired")
 
-    # Получаем настройки сервера
-    server_id = sub.get("server_id", "")
-    cfg = get_server_config(server_id)
+    # Загружаем конфигурацию серверов если не загружена
+    if not server_manager.servers:
+        server_manager.load_config()
 
-    # Формируем название с флагом страны
+    # Получаем все включенные серверы
+    enabled_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+
+    # Формируем список VLESS ссылок для отображения
+    vless_links = []
     end_date_str = format_date(sub["end_date"]) if sub.get("end_date") else ""
-    flag = cfg["flag"]
-    remark = f"{flag} SWAGA VPN - до {end_date_str}" if end_date_str else f"{flag} SWAGA VPN"
 
-    vless_link = build_vless_link(
-        uuid_str=sub["vless_uuid"],
-        host=cfg["host"],
-        port=cfg["port"],
-        transport=cfg["transport"],
-        path=cfg["path"],
-        camouflage_host=cfg["camouflage_host"],
-        xhttp_mode=cfg["xhttp_mode"],
-        reality_pbk=cfg["reality_pbk"],
-        reality_sid=cfg["reality_sid"],
-        reality_fp=cfg["reality_fp"],
-        reality_sni=cfg["reality_sni"],
-        reality_spx=REALITY_SPIDERX,
-        remark=remark,
-    )
+    if not enabled_servers:
+        # Fallback на дефолтный сервер
+        server_id = sub.get("server_id", "")
+        cfg = get_server_config(server_id)
+        flag = cfg["flag"]
+        remark = f"{flag} SWAGA VPN - до {end_date_str}" if end_date_str else f"{flag} SWAGA VPN"
 
+        vless_link = build_vless_link(
+            uuid_str=sub["vless_uuid"],
+            host=cfg["host"],
+            port=cfg["port"],
+            transport=cfg["transport"],
+            path=cfg["path"],
+            camouflage_host=cfg["camouflage_host"],
+            xhttp_mode=cfg["xhttp_mode"],
+            reality_pbk=cfg["reality_pbk"],
+            reality_sid=cfg["reality_sid"],
+            reality_fp=cfg["reality_fp"],
+            reality_sni=cfg["reality_sni"],
+            reality_spx=REALITY_SPIDERX,
+            remark=remark,
+        )
+        vless_links.append(vless_link)
+    else:
+        for server in enabled_servers:
+            cfg = get_server_config(server.id)
+            flag = cfg["flag"]
+            server_name = server.name if hasattr(server, 'name') else server.location
+            remark = f"{flag} SWAGA {server_name} - до {end_date_str}" if end_date_str else f"{flag} SWAGA {server_name}"
+
+            vless_link = build_vless_link(
+                uuid_str=sub["vless_uuid"],
+                host=cfg["host"],
+                port=cfg["port"],
+                transport=cfg["transport"],
+                path=cfg["path"],
+                camouflage_host=cfg["camouflage_host"],
+                xhttp_mode=cfg["xhttp_mode"],
+                reality_pbk=cfg["reality_pbk"],
+                reality_sid=cfg["reality_sid"],
+                reality_fp=cfg["reality_fp"],
+                reality_sni=cfg["reality_sni"],
+                reality_spx=REALITY_SPIDERX,
+                remark=remark,
+            )
+            vless_links.append(vless_link)
+
+    # Используем URL подписки для deeplink (V2RayTun автоматически загрузит все серверы)
     sub_url = f"{SUB_BASE_URL}{sub_id}"
-    # Deep link for V2RayTun: v2raytun://import/SUBSCRIPTION_URL
     deeplink = f"v2raytun://import/{sub_url}"
-    html = CONNECT_HTML.format(vless_link=vless_link, sub_url=sub_url, deeplink=deeplink)
+
+    # Для ручного копирования показываем первую ссылку (пользователь может импортировать подписку через URL)
+    first_vless_link = vless_links[0] if vless_links else ""
+
+    html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink)
 
     return web.Response(text=html, content_type="text/html")
 
