@@ -42,6 +42,7 @@ class VPNServer:
     transport_path: str = ""         # Путь для xhttp/ws
     transport_host: str = ""         # Host header
     xhttp_mode: str = "packet-up"    # Режим xhttp
+    flow: str = ""                   # Flow для TCP (xtls-rprx-vision)
 
     # Reality настройки
     reality_pbk: str = ""            # Public Key

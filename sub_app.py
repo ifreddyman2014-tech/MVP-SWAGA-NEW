@@ -49,6 +49,7 @@ def get_server_config(server_id: str) -> dict:
             "path": srv.transport_path or VPN_PATH,
             "camouflage_host": srv.transport_host or VPN_CAMOUFLAGE_HOST,
             "xhttp_mode": srv.xhttp_mode or VPN_XHTTP_MODE,
+            "flow": srv.flow or "",
             "reality_pbk": srv.reality_pbk,
             "reality_sid": srv.reality_sid,
             "reality_fp": srv.reality_fp or REALITY_FINGERPRINT,
@@ -65,6 +66,7 @@ def get_server_config(server_id: str) -> dict:
         "path": VPN_PATH,
         "camouflage_host": VPN_CAMOUFLAGE_HOST,
         "xhttp_mode": VPN_XHTTP_MODE,
+        "flow": "",
         "reality_pbk": REALITY_PUBLIC_KEY,
         "reality_sid": REALITY_SHORT_ID,
         "reality_fp": REALITY_FINGERPRINT,
@@ -117,6 +119,7 @@ async def handle_subscription(request: web.Request) -> web.Response:
             reality_sni=cfg["reality_sni"],
             reality_spx=REALITY_SPIDERX,
             remark=remark,
+            flow=cfg["flow"],
         )
         encoded = base64.b64encode(vless_link.encode()).decode()
     else:
@@ -146,6 +149,7 @@ async def handle_subscription(request: web.Request) -> web.Response:
                 reality_sni=cfg["reality_sni"],
                 reality_spx=REALITY_SPIDERX,
                 remark=remark,
+                flow=cfg["flow"],
             )
             vless_links.append(vless_link)
 
@@ -328,6 +332,7 @@ async def handle_connect(request: web.Request) -> web.Response:
             reality_sni=cfg["reality_sni"],
             reality_spx=REALITY_SPIDERX,
             remark=remark,
+            flow=cfg["flow"],
         )
         vless_links.append(vless_link)
     else:
@@ -351,6 +356,7 @@ async def handle_connect(request: web.Request) -> web.Response:
                 reality_sni=cfg["reality_sni"],
                 reality_spx=REALITY_SPIDERX,
                 remark=remark,
+                flow=cfg["flow"],
             )
             vless_links.append(vless_link)
 

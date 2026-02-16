@@ -41,22 +41,40 @@ def build_vless_link(
     reality_sni: str,
     reality_spx: str,
     remark: str = "SWAGA VPN",
+    flow: str = "",
 ) -> str:
-    """Сформировать VLESS Reality + XHTTP ссылку для подключения."""
-    enc_path = quote(path, safe="")
+    """Сформировать VLESS Reality ссылку для подключения (TCP или xHTTP)."""
     enc_spx = quote(reality_spx, safe="")
     enc_remark = quote(remark, safe="")
-    return (
-        f"vless://{uuid_str}@{host}:{port}"
-        f"?type={transport}"
-        f"&path={enc_path}"
-        f"&host={camouflage_host}"
-        f"&mode={xhttp_mode}"
-        f"&security=reality"
-        f"&pbk={reality_pbk}"
-        f"&fp={reality_fp}"
-        f"&sni={reality_sni}"
-        f"&sid={reality_sid}"
-        f"&spx={enc_spx}"
-        f"#{enc_remark}"
-    )
+
+    # Базовая часть ссылки
+    base = f"vless://{uuid_str}@{host}:{port}?security=reality"
+
+    # Добавляем параметры в зависимости от транспорта
+    if transport == "tcp":
+        # TCP транспорт: используем flow вместо xhttp параметров
+        flow_param = f"&flow={flow}" if flow else ""
+        params = (
+            f"{flow_param}"
+            f"&pbk={reality_pbk}"
+            f"&fp={reality_fp}"
+            f"&sni={reality_sni}"
+            f"&sid={reality_sid}"
+            f"&spx={enc_spx}"
+        )
+    else:
+        # xHTTP или другой транспорт: используем старые параметры
+        enc_path = quote(path, safe="")
+        params = (
+            f"&type={transport}"
+            f"&path={enc_path}"
+            f"&host={camouflage_host}"
+            f"&mode={xhttp_mode}"
+            f"&pbk={reality_pbk}"
+            f"&fp={reality_fp}"
+            f"&sni={reality_sni}"
+            f"&sid={reality_sid}"
+            f"&spx={enc_spx}"
+        )
+
+    return f"{base}{params}#{enc_remark}"
