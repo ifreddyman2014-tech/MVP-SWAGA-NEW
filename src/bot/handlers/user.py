@@ -680,25 +680,52 @@ async def access_show_keys(callback: CallbackQuery, session: AsyncSession):
         )
         return
 
-    # Build VLESS links
+    # Build VLESS links with server info
     vless_links = []
-    for key, server in keys_servers:
-        vless_links.append(build_vless_link(key.key_uuid, server))
+    servers_info = []
 
-    # Build deeplink
+    # Location emojis
+    location_flags = {
+        "FI": "🇫🇮",
+        "DE": "🇩🇪",
+        "LV": "🇱🇻",
+        "NL": "🇳🇱",
+        "US": "🇺🇸",
+        "GB": "🇬🇧",
+    }
+
+    for key, server in keys_servers:
+        vless_link = build_vless_link(key.key_uuid, server)
+        vless_links.append(vless_link)
+
+        # Get location flag
+        flag = location_flags.get(server.name.split()[0] if server.name else "FI", "🌐")
+        if "Финляндия" in server.name or "Finland" in server.name:
+            flag = "🇫🇮"
+        elif "Германия" in server.name or "Germany" in server.name:
+            flag = "🇩🇪"
+        elif "Латвия" in server.name or "Latvia" in server.name:
+            flag = "🇱🇻"
+
+        servers_info.append(f"{flag} <b>{server.name}</b>\n<code>{vless_link}</code>")
+
+    # Build deeplink (use first server)
     deeplink = build_v2raytun_deeplink(vless_links[0])
 
     # Format message
     expiry_str = format_date(subscription.expiry_date)
     days_left = max((subscription.expiry_date - datetime.utcnow()).days, 0)
 
-    links_text = "\n\n".join([f"<code>{link}</code>" for link in vless_links])
+    servers_text = "\n\n".join(servers_info)
+    server_count = len(keys_servers)
 
     text = (
         f"🔑 <b>Твои ключи доступа</b>\n\n"
         f"📅 Активно до: <b>{expiry_str}</b>\n"
-        f"⏱ Осталось: <b>{days_left} дн.</b>\n\n"
-        f"{links_text}\n\n"
+        f"⏱ Осталось: <b>{days_left} дн.</b>\n"
+        f"🌍 Доступно серверов: <b>{server_count}</b>\n\n"
+        f"{servers_text}\n\n"
+        f"<i>💡 Выбери любой сервер — все работают одновременно!</i>\n"
         f"<i>Нажми кнопку ниже для быстрого подключения</i>"
     )
 
