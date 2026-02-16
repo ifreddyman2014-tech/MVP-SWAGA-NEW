@@ -58,7 +58,7 @@ from database import (
     mark_cleanup_done,
 )
 from xui_api import XUIAPI
-from yookassa_payment import create_payment as yookassa_create_payment
+# from yookassa_payment import create_payment as yookassa_create_payment  # Временно отключено
 from backup import backup_now
 from utils import generate_uuid, generate_sub_id, format_date, build_vless_link
 from sub_app import start_sub_server, stop_sub_server, set_payment_callback
@@ -965,13 +965,14 @@ async def _create_subscription_on_server(
             discount_text = ""
 
         # Создаём платёж
-        payment_result = yookassa_create_payment(
-            amount=final_price,
-            user_id=user_id,
-            plan_key=plan_key,
-            server_id=server_id or "",
-            description=f"SWAGA VPN — {plan['name']}",
-        )
+        # payment_result = yookassa_create_payment(  # Временно отключено
+        #     amount=final_price,
+        #     user_id=user_id,
+        #     plan_key=plan_key,
+        #     server_id=server_id or "",
+        #     description=f"SWAGA VPN — {plan['name']}",
+        # )
+        payment_result = None  # Для тестирования
 
         if not payment_result:
             await callback.message.answer(
