@@ -76,7 +76,7 @@
       "xui_username": "NU0XH7Xpp0",
       "xui_password": "guSnPgUPWa",
       "vpn_port": 27934,
-      "inbound_id": 1,
+      "inbound_id": 2,
       "max_users": 150,
       "priority": 15,
       "enabled": true,
