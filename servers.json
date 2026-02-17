@@ -89,6 +89,28 @@
       "reality_fp": "chrome"
     },
     {
+      "id": "us1",
+      "name": "США",
+      "host": "151.242.63.15",
+      "xui_host": "151.242.63.15",
+      "xui_port": 61753,
+      "xui_web_path": "/8J0lp7fw3i0SRtKAp6",
+      "xui_username": "6v94Sn6w9D",
+      "xui_password": "sCIHDcxQF1",
+      "vpn_port": 35887,
+      "inbound_id": 1,
+      "max_users": 150,
+      "priority": 10,
+      "enabled": true,
+      "location": "US",
+      "transport": "xhttp",
+      "flow": "",
+      "reality_pbk": "IjDMxClISYZ_8Vk67AcfU0Nf0ruJnioZY7CBdUsnhS8",
+      "reality_sid": "062bff060bc77823",
+      "reality_sni": "www.amd.com",
+      "reality_fp": "chrome"
+    },
+    {
       "id": "ee1",
       "name": "Эстония",
       "host": "188.127.247.137",
