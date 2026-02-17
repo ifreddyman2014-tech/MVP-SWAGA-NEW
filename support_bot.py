@@ -4,8 +4,11 @@ SWAGA VPN Support Bot — FAQ и поддержка пользователей.
 
 import logging
 import os
+from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, types, executor
 from aiogram.dispatcher.filters import Text
+
+load_dotenv()
 
 # ── Настройки ─────────────────────────────────────────────────────────────────
 
