@@ -9,7 +9,14 @@ User=root
 WorkingDirectory=/root/MVP-SWAGA-NEW
 EnvironmentFile=/root/MVP-SWAGA-NEW/.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/bin/bash -c 'exec $([ -f /root/MVP-SWAGA-NEW/venv/bin/python3 ] && echo /root/MVP-SWAGA-NEW/venv/bin/python3 || echo python3) /root/MVP-SWAGA-NEW/support_bot.py'
+ExecStart=/bin/bash -c '\
+  for p in \
+    /root/MVP-SWAGA-NEW/venv/bin/python3 \
+    /root/venv/bin/python3 \
+    /opt/vpn-bot/venv/bin/python3 \
+    /root/bot-venv/bin/python3; \
+  do [ -f "$p" ] && exec "$p" /root/MVP-SWAGA-NEW/support_bot.py; done; \
+  exec python3 /root/MVP-SWAGA-NEW/support_bot.py'
 Restart=always
 RestartSec=5
 StartLimitIntervalSec=300
