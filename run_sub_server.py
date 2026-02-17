@@ -22,11 +22,11 @@ async def main():
     try:
         from sub_app import start_sub_server
         await start_sub_server()
-        logger.info("✅ Subscription server запущен на http://127.0.0.1:8889")
+        logger.info("✅ Subscription server запущен на http://127.0.0.1:8888")
         logger.info("🔗 Тестовые URL:")
-        logger.info("   curl http://127.0.0.1:8889/sub/im8ccac3hknqi1ob")
-        logger.info("   curl http://127.0.0.1:8889/sub/yiqgsr0kg92a5fgx")
-        logger.info("   curl http://127.0.0.1:8889/sub/4dj2j16uvawqeb9r")
+        logger.info("   curl http://127.0.0.1:8888/sub/im8ccac3hknqi1ob")
+        logger.info("   curl http://127.0.0.1:8888/sub/yiqgsr0kg92a5fgx")
+        logger.info("   curl http://127.0.0.1:8888/sub/4dj2j16uvawqeb9r")
         logger.info("")
         logger.info("⏳ Сервер будет работать 10 минут...")
 
