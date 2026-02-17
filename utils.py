@@ -58,6 +58,7 @@ def build_vless_link(
         # TCP транспорт: используем flow вместо xhttp параметров
         flow_param = f"&flow={flow}" if flow else ""
         params = (
+            f"&type=tcp"
             f"{flow_param}"
             f"&pbk={reality_pbk}"
             f"&fp={reality_fp}"
