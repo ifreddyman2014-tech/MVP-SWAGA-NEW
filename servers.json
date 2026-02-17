@@ -67,6 +67,28 @@
       "reality_fp": "chrome"
     },
     {
+      "id": "fr1",
+      "name": "Франция",
+      "host": "194.59.30.107",
+      "xui_host": "194.59.30.107",
+      "xui_port": 4444,
+      "xui_web_path": "/iV31Zfverpgxjo2m6D",
+      "xui_username": "cDEPkmdjId",
+      "xui_password": "ORnzDpmBR1",
+      "vpn_port": 54232,
+      "inbound_id": 1,
+      "max_users": 100,
+      "priority": 10,
+      "enabled": true,
+      "location": "FR",
+      "transport": "xhttp",
+      "flow": "",
+      "reality_pbk": "WcK145ahsQk6Y0DF6N_QK5CEE3H-QRVLX4DbIIOtrTY",
+      "reality_sid": "1d516356878341",
+      "reality_sni": "www.intel.com",
+      "reality_fp": "chrome"
+    },
+    {
       "id": "nl1",
       "name": "Нидерланды",
       "host": "188.127.247.137",
