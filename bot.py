@@ -423,6 +423,86 @@ async def cmd_reset_me(message: types.Message) -> None:
     )
 
 
+@dp.message_handler(commands=["reissue"])
+async def cmd_reissue(message: types.Message) -> None:
+    """Перевыпустить VPN-доступ для пользователя по Telegram ID (только для админов).
+    Использование: /reissue <user_id>
+    """
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("⛔ Только для администраторов.")
+        return
+
+    args = message.get_args().strip()
+    if not args or not args.isdigit():
+        await message.answer("Использование: /reissue <telegram_user_id>")
+        return
+
+    target_id = int(args)
+    sub = await get_active_sub(target_id)
+    if not sub:
+        await message.answer(f"❌ Активная подписка для {target_id} не найдена.")
+        return
+
+    old_uuid = sub.get("vless_uuid", "")
+    sub_db_id = sub["sub_id"]
+    xui_sub_id = sub.get("xui_sub_id", "")
+    end_date = sub.get("end_date", "")
+    expiry_ms = int(datetime.fromisoformat(end_date).timestamp() * 1000) if end_date else 0
+
+    new_uuid = generate_uuid()
+    new_email = f"tg_{target_id}_{int(datetime.utcnow().timestamp())}"
+
+    await message.answer(f"🔄 Перевыпускаю доступ для {target_id}...")
+
+    from servers import server_manager
+    if not server_manager.servers:
+        server_manager.load_config()
+    enabled_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+
+    added = []
+    for server in enabled_servers:
+        try:
+            srv_xui = XUIAPI()
+            protocol = "https" if server.xui_host not in ("127.0.0.1", "localhost") else "http"
+            srv_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+            login_resp = srv_xui.session.post(
+                f"{srv_xui.base_url}/login",
+                json={"username": server.xui_username, "password": server.xui_password},
+                verify=False, timeout=10,
+            )
+            if not login_resp.json().get("success"):
+                logger.warning("reissue: авторизация не удалась на %s", server.name)
+                continue
+            srv_xui._logged_in = True
+            # Удаляем старый UUID если есть
+            if old_uuid:
+                srv_xui.delete_client(server.inbound_id, old_uuid)
+            # Добавляем с новым UUID
+            ok = srv_xui.add_client(
+                server.inbound_id, new_uuid, new_email,
+                sub_id=xui_sub_id, expiry_time=expiry_ms,
+                flow=server.flow,
+            )
+            if ok:
+                added.append(server.name)
+        except Exception as e:
+            logger.error("reissue: ошибка на %s: %s", server.name, e)
+
+    if not added:
+        await message.answer("❌ Не удалось добавить клиента ни на один сервер.")
+        return
+
+    # Обновляем UUID в БД
+    await update_sub_server(sub_db_id, sub.get("server_id", ""), new_uuid, new_email, xui_sub_id)
+
+    await message.answer(
+        f"✅ Доступ перевыпущен для {target_id}\n"
+        f"Серверы: {', '.join(added)}\n"
+        f"Подписка действует до: {end_date[:10] if end_date else '?'}\n\n"
+        f"Пользователю нужно обновить подписку в V2RayTun."
+    )
+
+
 @dp.message_handler(commands=["capacity"])
 async def cmd_capacity(message: types.Message) -> None:
     """Показать вместимость сервера (только для админов)."""
