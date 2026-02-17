@@ -177,12 +177,9 @@ class ServerManager:
 
     async def check_server_health(self, server: VPNServer) -> bool:
         """Проверить доступность сервера."""
-        # Порты 443, 2053, 2083, 2096 — стандартные HTTPS порты для 3X-UI
-        https_ports = (443, 2053, 2083, 2096, 8443)
-        protocol = "https" if server.xui_port in https_ports else "http"
-        # Убираем trailing slash из web_path чтобы избежать //login
+        # Всегда используем HTTPS — 3X-UI панели редиректят с HTTP на HTTPS
         web_path = server.xui_web_path.rstrip("/")
-        url = f"{protocol}://{server.xui_host}:{server.xui_port}{web_path}/login"
+        url = f"https://{server.xui_host}:{server.xui_port}{web_path}/login"
 
         try:
             timeout = aiohttp.ClientTimeout(total=10)
