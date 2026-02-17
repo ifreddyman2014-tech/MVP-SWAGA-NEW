@@ -1011,6 +1011,45 @@ async def cb_server_selected(callback: types.CallbackQuery) -> None:
     await _create_subscription_on_server(callback, plan_key, server_id)
 
 
+def _sync_client_to_other_servers(
+    uuid: str, email: str, sub_id: str, expiry_ms: int,
+    primary_server_id: str, enabled_servers: list,
+) -> None:
+    """Register/update client on all enabled servers except the primary (best-effort, sync)."""
+    from xui_api import XUIAPI
+
+    for server in enabled_servers:
+        if server.id == primary_server_id:
+            continue
+        try:
+            srv_xui = XUIAPI()
+            protocol = "https" if server.xui_host not in ("127.0.0.1", "localhost") else "http"
+            srv_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+            login_resp = srv_xui.session.post(
+                f"{srv_xui.base_url}/login",
+                json={"username": server.xui_username, "password": server.xui_password},
+                verify=False, timeout=10,
+            )
+            if not login_resp.json().get("success"):
+                logger.warning("sync: auth failed on %s", server.name)
+                continue
+            srv_xui._logged_in = True
+            ok = srv_xui.add_client(
+                server.inbound_id, uuid, email,
+                sub_id=sub_id, expiry_time=expiry_ms,
+                flow=server.flow,
+            )
+            if not ok:
+                srv_xui.update_client(
+                    server.inbound_id, uuid, email,
+                    sub_id=sub_id, expiry_time=expiry_ms,
+                    flow=server.flow,
+                )
+            logger.info("sync: %s added/updated on %s", email, server.name)
+        except Exception as e:
+            logger.warning("sync: failed to sync %s to %s: %s", email, server.name, e)
+
+
 async def _create_subscription_on_server(
     callback: types.CallbackQuery,
     plan_key: str,
@@ -1153,6 +1192,14 @@ async def _create_subscription_on_server(
                         )
                 except Exception as e:
                     logger.warning("Не удалось обновить expiry в панели: %s", e)
+                # Обновляем expiry на всех остальных включённых серверах
+                other_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+                if len(other_servers) > 1:
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None, _sync_client_to_other_servers,
+                        new_uuid, email, sub_id, new_expiry_ms, actual_server_id, other_servers,
+                    )
         else:
             vpn_host = VPN_HOST
             vpn_port = VPN_PORT
@@ -1238,6 +1285,14 @@ async def _create_subscription_on_server(
                 vpn_port = server.vpn_port
                 actual_server_id = server.id
                 server.current_users += 1
+                # Регистрируем UUID на всех остальных включённых серверах
+                other_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+                if len(other_servers) > 1:
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None, _sync_client_to_other_servers,
+                        new_uuid, email, sub_id, expiry_ms, actual_server_id, other_servers,
+                    )
 
             if not success:
                 raise RuntimeError("3X-UI add_client вернул False")
@@ -2027,6 +2082,14 @@ async def handle_payment_success(
                         )
                 except Exception as e:
                     logger.warning("Не удалось обновить expiry в панели: %s", e)
+                # Обновляем expiry на всех остальных включённых серверах
+                other_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+                if len(other_servers) > 1:
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None, _sync_client_to_other_servers,
+                        new_uuid, email, sub_id, new_expiry_ms, actual_server_id, other_servers,
+                    )
         else:
             server = None
             vpn_host = VPN_HOST
@@ -2103,6 +2166,14 @@ async def handle_payment_success(
                 vpn_port = server.vpn_port
                 actual_server_id = server.id
                 server.current_users += 1
+                # Регистрируем UUID на всех остальных включённых серверах
+                other_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+                if len(other_servers) > 1:
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None, _sync_client_to_other_servers,
+                        new_uuid, email, sub_id, expiry_ms, actual_server_id, other_servers,
+                    )
 
             if not success:
                 raise RuntimeError("3X-UI add_client вернул False")
