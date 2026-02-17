@@ -1104,14 +1104,14 @@ async def _create_subscription_on_server(
             discount_text = ""
 
         # Создаём платёж
-        # payment_result = yookassa_create_payment(  # Временно отключено
-        #     amount=final_price,
-        #     user_id=user_id,
-        #     plan_key=plan_key,
-        #     server_id=server_id or "",
-        #     description=f"SWAGA VPN — {plan['name']}",
-        # )
-        payment_result = None  # Для тестирования
+        from yookassa_payment import create_payment as yookassa_create_payment
+        payment_result = yookassa_create_payment(
+            amount=final_price,
+            user_id=user_id,
+            plan_key=plan_key,
+            server_id=server_id or "",
+            description=f"SWAGA VPN — {plan['name']}",
+        )
 
         if not payment_result:
             await callback.message.answer(
@@ -1520,6 +1520,7 @@ async def _create_subscription_on_server(
                         reality_sni=server.reality_sni,
                         reality_spx=REALITY_SPIDERX,
                         remark=server_remark,
+                        flow=server.flow,
                     )
                 else:
                     server_vless_link = build_vless_link(
@@ -1536,6 +1537,7 @@ async def _create_subscription_on_server(
                         reality_sni=REALITY_SNI,
                         reality_spx=REALITY_SPIDERX,
                         remark=server_remark,
+                        flow=server.flow,
                     )
 
                 flag = location_flags.get(server.location, "🌐")
