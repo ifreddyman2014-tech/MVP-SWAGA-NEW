@@ -9,11 +9,9 @@
 """
 
 import argparse
-import asyncio
+import sqlite3
 import sys
 from datetime import datetime
-
-import aiosqlite
 
 from config import DB_PATH
 from servers import server_manager
@@ -27,18 +25,19 @@ def build_server_xui(server) -> XUIAPI:
     return xui
 
 
-async def get_active_subscriptions():
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            """SELECT vless_uuid, xui_email, xui_sub_id, end_date
-               FROM subscriptions
-               WHERE is_active = 1
-                 AND end_date > datetime('now')
-                 AND vless_uuid IS NOT NULL
-                 AND vless_uuid != ''"""
-        )
-        return [dict(r) for r in await cursor.fetchall()]
+def get_active_subscriptions():
+    con = sqlite3.connect(DB_PATH)
+    con.row_factory = sqlite3.Row
+    rows = con.execute(
+        """SELECT vless_uuid, xui_email, xui_sub_id, end_date
+           FROM subscriptions
+           WHERE is_active = 1
+             AND end_date > datetime('now')
+             AND vless_uuid IS NOT NULL
+             AND vless_uuid != ''"""
+    ).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
 
 
 def ms_from_date(end_date: str) -> int:
@@ -49,7 +48,7 @@ def ms_from_date(end_date: str) -> int:
         return 0
 
 
-async def main(dry_run: bool):
+def main(dry_run: bool):
     server_manager.load_config()
     enabled_servers = [s for s in server_manager.get_all_servers() if s.enabled]
 
@@ -57,9 +56,9 @@ async def main(dry_run: bool):
         print("❌ Нет включённых серверов")
         return 1
 
-    print(f"Серверы для синхронизации: {', '.join(s.name for s in enabled_servers)}")
+    print(f"Серверы: {', '.join(s.name for s in enabled_servers)}")
 
-    subs = await get_active_subscriptions()
+    subs = get_active_subscriptions()
     print(f"Активных подписок: {len(subs)}")
     if not subs:
         print("Нечего синхронизировать")
@@ -93,11 +92,11 @@ async def main(dry_run: bool):
         for sub in subs:
             uuid = sub["vless_uuid"]
             email = sub.get("xui_email") or f"sync_{uuid[:8]}"
-            sub_id = sub.get("xui_sub_id", "")
+            sub_id = sub.get("xui_sub_id") or ""
             expiry_ms = ms_from_date(sub["end_date"])
 
             if dry_run:
-                print(f"  [dry] {email} → добавить/обновить на {server.name}")
+                print(f"  [dry] {email}")
                 ok += 1
                 continue
 
@@ -111,7 +110,6 @@ async def main(dry_run: bool):
                     print(f"  ✅ {email}")
                     ok += 1
                 else:
-                    # Попробуем update (клиент уже есть)
                     result2 = xui.update_client(
                         server.inbound_id, uuid, email,
                         sub_id=sub_id, expiry_time=expiry_ms,
@@ -121,7 +119,7 @@ async def main(dry_run: bool):
                         print(f"  🔄 {email} (обновлён)")
                         ok += 1
                     else:
-                        print(f"  ⚠️  {email} (add+update не удалось)")
+                        print(f"  ⚠️  {email} (не удалось)")
                         fail += 1
             except Exception as e:
                 print(f"  ❌ {email}: {e}")
@@ -129,8 +127,8 @@ async def main(dry_run: bool):
 
     print(f"\n{'='*40}")
     print(f"Итого: ✅ {ok}  ❌ {fail}")
-    if not dry_run:
-        print("Готово! Попросите пользователей обновить подписку в V2RayTun.")
+    if not dry_run and ok > 0:
+        print("Готово! Пользователям нужно обновить подписку в V2RayTun.")
     return 0 if fail == 0 else 1
 
 
@@ -138,4 +136,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    sys.exit(asyncio.run(main(args.dry_run)))
+    sys.exit(main(args.dry_run))
