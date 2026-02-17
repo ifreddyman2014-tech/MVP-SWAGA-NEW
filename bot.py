@@ -1068,7 +1068,8 @@ async def _create_subscription_on_server(
                         server_xui._logged_in = True
                         server_xui.update_client(
                             server.inbound_id, new_uuid, email,
-                            sub_id=sub_id, expiry_time=new_expiry_ms
+                            sub_id=sub_id, expiry_time=new_expiry_ms,
+                            flow=server.flow
                         )
                 except Exception as e:
                     logger.warning("Не удалось обновить expiry в панели: %s", e)
@@ -1150,7 +1151,8 @@ async def _create_subscription_on_server(
                 server_xui._logged_in = True  # Помечаем как авторизованный
                 success = server_xui.add_client(
                     server.inbound_id, new_uuid, email,
-                    sub_id=sub_id, expiry_time=expiry_ms
+                    sub_id=sub_id, expiry_time=expiry_ms,
+                    flow=server.flow
                 )
                 vpn_host = server.host
                 vpn_port = server.vpn_port
@@ -1331,7 +1333,8 @@ async def _create_subscription_on_server(
                 logger.debug(f"Добавление клиента на {server.name}: inbound_id={server.inbound_id}, uuid={new_uuid[:8]}...")
                 server_xui.add_client(
                     server.inbound_id, new_uuid, email,
-                    sub_id=sub_id, expiry_time=expiry_ms
+                    sub_id=sub_id, expiry_time=expiry_ms,
+                    flow=server.flow
                 )
                 logger.info(f"✅ Клиент успешно добавлен на {server.name}")
 
@@ -1629,7 +1632,8 @@ async def _migrate_user_to_server(sub: dict, new_server) -> bool:
         server_xui._logged_in = True
         success = server_xui.add_client(
             new_server.inbound_id, new_uuid, new_email,
-            sub_id=new_sub_id, expiry_time=expiry_ms
+            sub_id=new_sub_id, expiry_time=expiry_ms,
+            flow=new_server.flow
         )
 
         if not success:
@@ -1938,7 +1942,8 @@ async def handle_payment_success(
                         server_xui._logged_in = True
                         server_xui.update_client(
                             server.inbound_id, new_uuid, email,
-                            sub_id=sub_id, expiry_time=new_expiry_ms
+                            sub_id=sub_id, expiry_time=new_expiry_ms,
+                            flow=server.flow
                         )
                 except Exception as e:
                     logger.warning("Не удалось обновить expiry в панели: %s", e)
@@ -2011,7 +2016,8 @@ async def handle_payment_success(
                 server_xui._logged_in = True
                 success = server_xui.add_client(
                     server.inbound_id, new_uuid, email,
-                    sub_id=sub_id, expiry_time=expiry_ms
+                    sub_id=sub_id, expiry_time=expiry_ms,
+                    flow=server.flow
                 )
                 vpn_host = server.host
                 vpn_port = server.vpn_port

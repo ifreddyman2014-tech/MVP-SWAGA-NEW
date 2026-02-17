@@ -61,6 +61,7 @@ class XUIAPI:
         email: str,
         sub_id: str = "",
         expiry_time: int = 0,
+        flow: str = "",
     ) -> bool:
         """
         Добавить клиента к inbound.
@@ -77,7 +78,7 @@ class XUIAPI:
                     "email": email,
                     "enable": True,
                     "expiryTime": expiry_time,
-                    "flow": "",
+                    "flow": flow,
                     "limitIp": 0,
                     "totalGB": 0,
                     "subId": sub_id,
@@ -104,6 +105,7 @@ class XUIAPI:
         email: str,
         sub_id: str = "",
         expiry_time: int = 0,
+        flow: str = "",
     ) -> bool:
         """
         Обновить параметры клиента (например, срок действия).
@@ -117,7 +119,7 @@ class XUIAPI:
                     "email": email,
                     "enable": True,
                     "expiryTime": expiry_time,
-                    "flow": "",
+                    "flow": flow,
                     "limitIp": 0,
                     "totalGB": 0,
                     "subId": sub_id,
