@@ -103,9 +103,9 @@
       "priority": 15,
       "enabled": true,
       "location": "NL",
-      "transport": "tcp",
-      "flow": "xtls-rprx-vision",
-      "reality_pbk": "_m6CDC7str9FmB-SiLJvI-saMZbvowQBRWGv0F7jORA",
+      "transport": "xhttp",
+      "flow": "",
+      "reality_pbk": "WcK145ahsQk6Y0DF6N_QK5CEE3H-QRVLX4DbIIOtrTY",
       "reality_sid": "d8a39b",
       "reality_sni": "www.tesla.com",
       "reality_fp": "chrome"
