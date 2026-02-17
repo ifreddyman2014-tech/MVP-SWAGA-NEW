@@ -56,6 +56,9 @@ from database import (
     save_migration,
     get_pending_cleanups,
     mark_cleanup_done,
+    get_all_user_ids,
+    get_compensation_claimed,
+    mark_compensation_claimed,
 )
 from xui_api import XUIAPI
 # from yookassa_payment import create_payment as yookassa_create_payment  # Временно отключено
@@ -726,6 +729,144 @@ async def cmd_promo_del(message: types.Message) -> None:
         await message.answer(f"✅ Промокод <code>{code}</code> деактивирован.")
     else:
         await message.answer(f"❌ Промокод <code>{code}</code> не найден.")
+
+
+@dp.callback_query_handler(lambda c: c.data == "update_access")
+async def cb_update_access(callback: types.CallbackQuery) -> None:
+    """Обновить доступ: +7 дней компенсации для платных, активация триала для остальных."""
+    user_id = callback.from_user.id
+    await callback.answer()
+
+    already_claimed = await get_compensation_claimed(user_id)
+    if already_claimed:
+        await callback.message.answer(
+            "✅ Вы уже получили компенсацию.\n"
+            "Если есть вопросы — обратитесь в поддержку.",
+            reply_markup=types.InlineKeyboardMarkup().add(
+                types.InlineKeyboardButton("Поддержка", url=SUPPORT_URL)
+            ),
+        )
+        return
+
+    sub = await get_active_sub(user_id)
+    now = datetime.utcnow()
+
+    if sub and sub.get("plan") != "trial":
+        # Платный подписчик → добавляем 7 дней
+        current_end = datetime.fromisoformat(sub["end_date"])
+        new_end = current_end + timedelta(days=7)
+
+        await extend_subscription_to_date(user_id, new_end)
+
+        # Обновляем в 3X-UI
+        new_expiry_ms = int(new_end.timestamp() * 1000)
+        new_uuid = sub["vless_uuid"]
+        email = sub.get("xui_email", f"tg_{user_id}")
+        xui_sub_id = sub.get("xui_sub_id", "")
+        actual_server_id = sub.get("server_id", "default")
+
+        try:
+            from servers import server_manager
+            if not server_manager.servers:
+                server_manager.load_config()
+            server = server_manager.get_server(actual_server_id) if actual_server_id != "default" else None
+            if server:
+                srv_xui = XUIAPI()
+                protocol = "https" if server.xui_host not in ("127.0.0.1", "localhost") else "http"
+                srv_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
+                login_resp = srv_xui.session.post(
+                    f"{srv_xui.base_url}/login",
+                    json={"username": server.xui_username, "password": server.xui_password},
+                    verify=False, timeout=10,
+                )
+                if login_resp.json().get("success"):
+                    srv_xui._logged_in = True
+                    srv_xui.update_client(
+                        server.inbound_id, new_uuid, email,
+                        sub_id=xui_sub_id, expiry_time=new_expiry_ms, flow=server.flow,
+                    )
+                    other_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+                    if len(other_servers) > 1:
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(
+                            None, _sync_client_to_other_servers,
+                            new_uuid, email, xui_sub_id, new_expiry_ms, actual_server_id, other_servers,
+                        )
+            else:
+                xui.update_client(INBOUND_ID, new_uuid, email, sub_id=xui_sub_id, expiry_time=new_expiry_ms)
+        except Exception as e:
+            logger.error("Ошибка обновления 3X-UI при компенсации: %s", e)
+
+        await mark_compensation_claimed(user_id)
+        new_end_str = format_date(new_end.isoformat())
+        await callback.message.answer(
+            f"🎁 <b>Компенсация начислена!</b>\n\n"
+            f"✅ Добавлено +7 дней к вашей подписке.\n"
+            f"📅 Новая дата окончания: <b>{new_end_str}</b>\n\n"
+            f"Спасибо за терпение! 💪",
+        )
+    else:
+        # Нет активной платной подписки → проверяем триал
+        user = await get_user(user_id)
+        if user and not user.get("trial_used"):
+            await callback.message.answer(
+                "🎁 <b>Активируйте пробный период!</b>\n\n"
+                "Вам доступны 7 дней бесплатного VPN.\n"
+                "Нажмите кнопку ниже для активации.",
+                reply_markup=types.InlineKeyboardMarkup().add(
+                    types.InlineKeyboardButton("🎁 Получить 7 дней бесплатно", callback_data="plan_trial")
+                ),
+            )
+        else:
+            await callback.message.answer(
+                "💬 Для получения компенсации обратитесь в поддержку.",
+                reply_markup=types.InlineKeyboardMarkup().add(
+                    types.InlineKeyboardButton("Поддержка", url=SUPPORT_URL)
+                ),
+            )
+
+
+@dp.message_handler(commands=["broadcast"])
+async def cmd_broadcast(message: types.Message) -> None:
+    """Рассылка уведомления об обновлении сервиса всем пользователям (только для админов)."""
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    broadcast_text = (
+        "🔔 <b>Обновление по работе сервиса</b>\n\n"
+        "В последние дни РКН активно блокировал VPN-серверы, из-за чего у части пользователей "
+        "могли наблюдаться перебои в подключении.\n\n"
+        "Мы оперативно подобрали новые стабильные серверы и полностью восстановили работу сервиса 💪\n\n"
+        "Чтобы повысить надёжность, теперь каждому пользователю доступны сразу 3 сервера. "
+        "В ближайшее время будем расширять линейку дальше.\n\n"
+        "🎁 <b>Компенсации и бонусы</b>\n\n"
+        "✅ Если у вас была пробная подписка — вы можете повторно активировать 7 дней.\n"
+        "✅ Если у вас платная подписка — добавляем ещё 7 дней сверху к текущему доступу.\n\n"
+        "📌 <b>Как получить?</b>\n"
+        "Нажмите кнопку ниже 👇"
+    )
+    kb = types.InlineKeyboardMarkup().add(
+        types.InlineKeyboardButton("🔄 Обновить доступ", callback_data="update_access")
+    )
+
+    user_ids = await get_all_user_ids()
+    status_msg = await message.answer(f"📤 Начинаю рассылку... Пользователей: {len(user_ids)}")
+
+    sent = 0
+    failed = 0
+    for uid in user_ids:
+        try:
+            await bot.send_message(uid, broadcast_text, reply_markup=kb)
+            sent += 1
+        except Exception:
+            failed += 1
+        await asyncio.sleep(0.05)  # ~20 сообщений/сек, в пределах лимитов Telegram
+
+    await status_msg.edit_text(
+        f"✅ Рассылка завершена!\n"
+        f"📤 Отправлено: {sent}\n"
+        f"❌ Не доставлено (заблокировали бота): {failed}"
+    )
 
 
 @dp.message_handler(commands=["servers"])

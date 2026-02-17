@@ -120,6 +120,12 @@ def quick_connect_kb(sub_url: str) -> InlineKeyboardMarkup:
     )
     kb.add(
         InlineKeyboardButton(
+            text="🔄 Обновить доступ",
+            callback_data="update_access",
+        )
+    )
+    kb.add(
+        InlineKeyboardButton(
             text="👥 Рефералы",
             callback_data="referrals",
         )
@@ -136,6 +142,12 @@ def quick_connect_kb(sub_url: str) -> InlineKeyboardMarkup:
 def cabinet_kb() -> InlineKeyboardMarkup:
     """Клавиатура личного кабинета (продление подписки + рефералы)."""
     kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(
+        InlineKeyboardButton(
+            text="🔄 Обновить доступ",
+            callback_data="update_access",
+        )
+    )
     kb.add(
         InlineKeyboardButton(
             text="👥 Рефералы",

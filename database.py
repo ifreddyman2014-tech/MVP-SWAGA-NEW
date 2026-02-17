@@ -65,6 +65,11 @@ async def init_db() -> None:
             await db.execute("ALTER TABLE subscriptions ADD COLUMN xui_email TEXT DEFAULT ''")
         except Exception:
             pass
+        # Миграция: добавить флаг получения компенсации
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN compensation_claimed INTEGER DEFAULT 0")
+        except Exception:
+            pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -794,5 +799,32 @@ async def clear_user_discount(user_id: int) -> None:
         await db.execute(
             "UPDATE users SET active_promo_id = NULL, active_discount = 0 WHERE user_id = ?",
             (user_id,),
+        )
+        await db.commit()
+
+
+async def get_all_user_ids() -> list[int]:
+    """Получить все ID пользователей для рассылки."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT user_id FROM users")
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
+
+
+async def get_compensation_claimed(user_id: int) -> bool:
+    """Проверить, получил ли пользователь компенсацию."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT compensation_claimed FROM users WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        return bool(row[0]) if row else False
+
+
+async def mark_compensation_claimed(user_id: int) -> None:
+    """Отметить что пользователь получил компенсацию."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET compensation_claimed = 1 WHERE user_id = ?", (user_id,)
         )
         await db.commit()
