@@ -182,7 +182,10 @@ def build_vless_link(uuid: str, server: Server) -> str:
     # Validate required fields - use defaults if empty or whitespace
     network_type = (server.network_type or "").strip() or "xhttp"
     security = (server.security or "").strip() or "reality"
-    flow = (server.flow or "").strip() or "xtls-rprx-vision"
+    # flow is only used for TCP/XTLS transport; for xhttp it must be empty
+    flow = (server.flow or "").strip()
+    if not flow and network_type != "xhttp":
+        flow = "xtls-rprx-vision"
     fingerprint = (server.fingerprint or "").strip() or "chrome"
 
     params = {
