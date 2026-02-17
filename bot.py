@@ -498,9 +498,28 @@ async def cmd_reissue(message: types.Message) -> None:
     await message.answer(
         f"✅ Доступ перевыпущен для {target_id}\n"
         f"Серверы: {', '.join(added)}\n"
-        f"Подписка действует до: {end_date[:10] if end_date else '?'}\n\n"
-        f"Пользователю нужно обновить подписку в V2RayTun."
+        f"Подписка действует до: {end_date[:10] if end_date else '?'}"
     )
+
+    # Уведомляем пользователя и отправляем кнопку обновления подписки
+    if xui_sub_id:
+        connect_base = SUB_BASE_URL.replace("/sub/", "/connect/")
+        connect_url = f"{connect_base}{xui_sub_id}"
+        user_kb = types.InlineKeyboardMarkup().add(
+            types.InlineKeyboardButton("🔄 Обновить подписку", url=connect_url)
+        )
+        try:
+            await bot.send_message(
+                target_id,
+                "🔄 <b>Ваш VPN-доступ был перевыпущен.</b>\n\n"
+                "Нажмите кнопку ниже и обновите подписку в V2RayTun, "
+                "чтобы продолжить пользоваться VPN.",
+                parse_mode="HTML",
+                reply_markup=user_kb,
+            )
+        except Exception as e:
+            logger.warning("reissue: не удалось уведомить пользователя %s: %s", target_id, e)
+            await message.answer("⚠️ Не удалось отправить уведомление пользователю (заблокировал бота?).")
 
 
 @dp.message_handler(commands=["capacity"])
