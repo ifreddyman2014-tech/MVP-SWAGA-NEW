@@ -1229,6 +1229,7 @@ async def _create_subscription_on_server(
                 logger.warning("Не удалось обновить expiry в панели: %s", e)
 
         end = new_end
+        expiry_ms = int(end.timestamp() * 1000)
         is_extension = True
 
     else:
@@ -1243,11 +1244,19 @@ async def _create_subscription_on_server(
 
         if server_id:
             server = server_manager.get_server(server_id)
+            if server is None:
+                server = server_manager.get_best_server()
         else:
             server = server_manager.get_best_server()
 
-        # Если нет серверов в мультисервере — используем текущий из .env
-        use_default = server is None
+        # Используем дефолт из .env только если в конфиге вообще нет серверов
+        use_default = server is None and not server_manager.servers
+
+        if server is None and server_manager.servers:
+            # Есть серверы в конфиге, но ни один не доступен — берём любой enabled
+            enabled = [s for s in server_manager.servers.values() if s.enabled]
+            server = enabled[0] if enabled else None
+            use_default = server is None
 
         # Создание VPN-клиента
         new_uuid = generate_uuid()
@@ -2129,10 +2138,18 @@ async def handle_payment_success(
         # Выбираем сервер
         if server_id:
             server = server_manager.get_server(server_id)
+            if server is None:
+                server = server_manager.get_best_server()
         else:
             server = server_manager.get_best_server()
 
-        use_default = server is None
+        # Используем дефолт из .env только если в конфиге вообще нет серверов
+        use_default = server is None and not server_manager.servers
+
+        if server is None and server_manager.servers:
+            enabled = [s for s in server_manager.servers.values() if s.enabled]
+            server = enabled[0] if enabled else None
+            use_default = server is None
 
         # Суммируем дни с существующей подпиской (даже при смене сервера)
         if existing_sub and existing_sub.get("end_date"):
