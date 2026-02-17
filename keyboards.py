@@ -163,6 +163,7 @@ def servers_kb(servers: list, plan_key: str) -> InlineKeyboardMarkup:
     flags = {
         "DE": "🇩🇪",
         "NL": "🇳🇱",
+        "EE": "🇪🇪",
         "US": "🇺🇸",
         "FI": "🇫🇮",
         "FR": "🇫🇷",

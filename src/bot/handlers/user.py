@@ -353,6 +353,7 @@ async def send_all_servers_message(
         "DE": "🇩🇪",
         "LV": "🇱🇻",
         "NL": "🇳🇱",
+        "EE": "🇪🇪",
         "US": "🇺🇸",
         "GB": "🇬🇧",
     }
@@ -804,6 +805,7 @@ async def access_show_keys(callback: CallbackQuery, session: AsyncSession):
         "DE": "🇩🇪",
         "LV": "🇱🇻",
         "NL": "🇳🇱",
+        "EE": "🇪🇪",
         "US": "🇺🇸",
         "GB": "🇬🇧",
     }

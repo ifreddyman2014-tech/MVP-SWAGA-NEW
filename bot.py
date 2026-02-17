@@ -217,12 +217,12 @@ async def handle_cabinet(message: types.Message) -> None:
     all_configs = []
 
     location_flags = {
-        "DE": "🇩🇪", "NL": "🇳🇱", "US": "🇺🇸", "FI": "🇫🇮",
+        "DE": "🇩🇪", "NL": "🇳🇱", "EE": "🇪🇪", "US": "🇺🇸", "FI": "🇫🇮",
         "FR": "🇫🇷", "GB": "🇬🇧", "LV": "🇱🇻", "RU": "🇷🇺", "KZ": "🇰🇿",
     }
 
     location_names = {
-        "DE": "Germany", "NL": "Netherlands", "US": "USA", "FI": "Finland",
+        "DE": "Germany", "NL": "Netherlands", "EE": "Estonia", "US": "USA", "FI": "Finland",
         "FR": "France", "GB": "UK", "LV": "Latvia", "RU": "Russia", "KZ": "Kazakhstan",
     }
 
@@ -1208,7 +1208,7 @@ async def _create_subscription_on_server(
 
     # Формируем название конфига с локацией
     location_names = {
-        "DE": "Germany", "NL": "Netherlands", "US": "USA", "FI": "Finland",
+        "DE": "Germany", "NL": "Netherlands", "EE": "Estonia", "US": "USA", "FI": "Finland",
         "FR": "France", "GB": "UK", "LV": "Latvia", "RU": "Russia", "KZ": "Kazakhstan",
     }
     if srv:
@@ -1267,7 +1267,7 @@ async def _create_subscription_on_server(
 
     # Добавляем текущий сервер/конфиг
     location_flags = {
-        "DE": "🇩🇪", "NL": "🇳🇱", "US": "🇺🇸", "FI": "🇫🇮",
+        "DE": "🇩🇪", "NL": "🇳🇱", "EE": "🇪🇪", "US": "🇺🇸", "FI": "🇫🇮",
         "FR": "🇫🇷", "GB": "🇬🇧", "LV": "🇱🇻", "RU": "🇷🇺", "KZ": "🇰🇿",
     }
 
@@ -2071,7 +2071,7 @@ async def handle_payment_success(
     srv = server_manager.get_server(actual_server_id) if actual_server_id != "default" else None
 
     location_names = {
-        "DE": "Germany", "NL": "Netherlands", "US": "USA", "FI": "Finland",
+        "DE": "Germany", "NL": "Netherlands", "EE": "Estonia", "US": "USA", "FI": "Finland",
         "FR": "France", "GB": "UK", "LV": "Latvia", "RU": "Russia", "KZ": "Kazakhstan",
     }
     if srv:

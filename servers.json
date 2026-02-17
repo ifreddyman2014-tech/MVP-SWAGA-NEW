@@ -89,8 +89,8 @@
       "reality_fp": "chrome"
     },
     {
-      "id": "nl1",
-      "name": "Нидерланды",
+      "id": "ee1",
+      "name": "Эстония",
       "host": "188.127.247.137",
       "xui_host": "188.127.247.137",
       "xui_port": 15343,
@@ -102,7 +102,7 @@
       "max_users": 150,
       "priority": 15,
       "enabled": true,
-      "location": "NL",
+      "location": "EE",
       "transport": "xhttp",
       "flow": "",
       "reality_pbk": "WcK145ahsQk6Y0DF6N_QK5CEE3H-QRVLX4DbIIOtrTY",
