@@ -5,6 +5,7 @@ aiogram v2 + asyncio scheduler для проверок подписок и бэ�
 
 import asyncio
 import logging
+import os
 import traceback
 from datetime import datetime, timedelta
 
@@ -826,9 +827,12 @@ async def cb_update_access(callback: types.CallbackQuery) -> None:
             )
 
 
+BROADCAST_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "media", "broadcast.jpg")
+
+
 @dp.message_handler(commands=["broadcast"])
 async def cmd_broadcast(message: types.Message) -> None:
-    """Рассылка уведомления об обновлении сервиса всем пользователям (только для админов)."""
+    """Рассылка уведомления об обновлении сервиса всем пользователями (только для админов)."""
     if message.from_user.id not in ADMIN_IDS:
         return
 
@@ -841,9 +845,11 @@ async def cmd_broadcast(message: types.Message) -> None:
         "В ближайшее время будем расширять линейку дальше.\n\n"
         "🎁 <b>Компенсации и бонусы</b>\n\n"
         "✅ Если у вас была пробная подписка — вы можете повторно активировать 7 дней.\n"
-        "✅ Если у вас платная подписка — добавляем ещё 7 дней сверху к текущему доступу.\n\n"
-        "📌 <b>Как получить?</b>\n"
-        "Нажмите кнопку ниже 👇"
+        "✅ Если у вас платная подписка — все дни простоя компенсируем + добавляем ещё 7 дней "
+        "сверху к текущему доступу.\n\n"
+        "📌 <b>Как получить доступ</b>\n"
+        "Перейдите в личный кабинет и просто нажмите кнопку 👉 «Обновить доступ»\n\n"
+        "Система автоматически активирует подписку или продлит срок действия."
     )
     kb = types.InlineKeyboardMarkup().add(
         types.InlineKeyboardButton("🔄 Обновить доступ", callback_data="update_access")
@@ -852,11 +858,27 @@ async def cmd_broadcast(message: types.Message) -> None:
     user_ids = await get_all_user_ids()
     status_msg = await message.answer(f"📤 Начинаю рассылку... Пользователей: {len(user_ids)}")
 
+    # Кешируем file_id фото после первой успешной отправки (быстрее для массовой рассылки)
+    use_photo = os.path.exists(BROADCAST_IMAGE_PATH)
+    photo_file_id: str | None = None
+
     sent = 0
     failed = 0
     for uid in user_ids:
         try:
-            await bot.send_message(uid, broadcast_text, reply_markup=kb)
+            if use_photo:
+                if photo_file_id:
+                    # Используем кешированный file_id — Telegram не перегружается
+                    await bot.send_photo(uid, photo_file_id, caption=broadcast_text, reply_markup=kb)
+                else:
+                    # Первая отправка — загружаем файл и сохраняем file_id
+                    with open(BROADCAST_IMAGE_PATH, "rb") as f:
+                        sent_msg = await bot.send_photo(
+                            uid, types.InputFile(f), caption=broadcast_text, reply_markup=kb,
+                        )
+                    photo_file_id = sent_msg.photo[-1].file_id
+            else:
+                await bot.send_message(uid, broadcast_text, reply_markup=kb)
             sent += 1
         except Exception:
             failed += 1
