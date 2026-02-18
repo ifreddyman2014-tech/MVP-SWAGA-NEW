@@ -33,9 +33,23 @@ cd "$WORKDIR"
 
 # ── 1. Git pull ────────────────────────────────────────
 step "Обновление кода ($BRANCH)"
+
+# .env хранит боевые credentials — сохраняем и восстанавливаем после pull
+if [ -f "$WORKDIR/.env" ]; then
+    cp "$WORKDIR/.env" /tmp/.env.deploy_backup
+    git checkout -- .env 2>/dev/null || true  # убираем "dirty" флаг, не теряя данные
+fi
+
 git fetch origin "$BRANCH"
 git checkout "$BRANCH"
 git pull origin "$BRANCH"
+
+# Возвращаем боевой .env
+if [ -f /tmp/.env.deploy_backup ]; then
+    cp /tmp/.env.deploy_backup "$WORKDIR/.env"
+    rm /tmp/.env.deploy_backup
+fi
+
 echo "Коммит: $(git log -1 --oneline)"
 ok "Код обновлён"
 
