@@ -28,7 +28,6 @@ echo "=================================================="
 # ── 0. Проверки ────────────────────────────────────────
 [ "$EUID" -eq 0 ] || fail "Запускай от root"
 [ -d "$WORKDIR" ]  || fail "Директория не найдена: $WORKDIR"
-[ -f "$VENV" ]     || fail "venv не найден: $VENV"
 cd "$WORKDIR"
 
 # ── 1. Git pull ────────────────────────────────────────
@@ -55,8 +54,18 @@ ok "Код обновлён"
 
 # ── 2. Зависимости ────────────────────────────────────
 step "Зависимости"
-"$VENV" -m pip install -r requirements.txt -q
-ok "Зависимости установлены"
+
+# swaga-bot.service использует /usr/bin/python3 (системный) — ставим туда
+pip3 install -r requirements.txt -q
+ok "Системные зависимости установлены"
+
+# venv нужен для swaga-support.service — ставим если есть
+if [ -f "$VENV" ]; then
+    "$VENV" -m pip install -r requirements.txt -q 2>&1 | grep -v "already satisfied" || true
+    ok "venv зависимости установлены"
+else
+    warn "venv не найден ($VENV) — пропускаю"
+fi
 
 # ── 3. Перезапуск ботов ───────────────────────────────
 step "Перезапуск сервисов"
@@ -76,7 +85,7 @@ if systemctl is-enabled "$BOT_SERVICE" &>/dev/null; then
     fi
 else
     warn "$BOT_SERVICE не зарегистрирован в systemd — запускаю напрямую"
-    nohup "$VENV" "$WORKDIR/bot.py" >> "$WORKDIR/bot.log" 2>&1 &
+    nohup /usr/bin/python3 "$WORKDIR/bot.py" >> "$WORKDIR/bot.log" 2>&1 &
     sleep 3
     pgrep -f "python.*bot.py" &>/dev/null && ok "bot.py запущен (PID: $(pgrep -f 'python.*bot.py'))" \
         || warn "Бот не запустился — смотри: tail -30 $WORKDIR/bot.log"
@@ -92,7 +101,7 @@ fi
 # ── 4. Синхронизация клиентов на все серверы ──────────
 step "Синхронизация клиентов на серверы"
 echo "Добавляем/обновляем всех активных пользователей на всех включённых серверах..."
-"$VENV" "$WORKDIR/sync_clients_to_servers.py" && ok "Синхронизация завершена" \
+/usr/bin/python3 "$WORKDIR/sync_clients_to_servers.py" && ok "Синхронизация завершена" \
     || warn "Синхронизация завершилась с ошибками — проверь вывод выше"
 
 # ── 5. Итог ───────────────────────────────────────────
@@ -102,7 +111,7 @@ echo -e "${GREEN}   Деплой завершён!${NC}"
 echo "=================================================="
 echo ""
 echo "Активные серверы:"
-"$VENV" -c "
+/usr/bin/python3 -c "
 import json
 d = json.load(open('servers.json'))
 for s in d['servers']:
