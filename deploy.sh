@@ -1,79 +1,103 @@
 #!/bin/bash
+# SWAGA VPN — одноклик деплой
+# Использование: bash deploy.sh
+
 set -e
 
-echo "=================================================="
-echo "SWAGA VPN - Quick Deployment Script"
-echo "=================================================="
-echo ""
-
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then 
-    echo -e "${RED}Error: Please run as root${NC}"
-    exit 1
-fi
+WORKDIR="/root/MVP-SWAGA-NEW"
+VENV="$WORKDIR/venv/bin/python3"
+BRANCH="claude/check-status-bH5rv"
+BOT_SERVICE="swaga-bot"
+SUPPORT_SERVICE="swaga-support"
 
-echo -e "${YELLOW}Step 1: Stopping existing bot...${NC}"
-pkill -f "python.*main.py" || true
-pkill -f "python.*bot.py" || true
-docker-compose stop vpn-bot 2>/dev/null || true
-echo -e "${GREEN}✓ Bot stopped${NC}"
-echo ""
+step() { echo -e "\n${BLUE}▶ $1${NC}"; }
+ok()   { echo -e "${GREEN}✓ $1${NC}"; }
+warn() { echo -e "${YELLOW}⚠ $1${NC}"; }
+fail() { echo -e "${RED}✗ $1${NC}"; exit 1; }
 
-echo -e "${YELLOW}Step 2: Updating code...${NC}"
-git fetch origin
-git checkout claude/check-status-bH5rv
-git pull origin claude/check-status-bH5rv
-echo -e "${GREEN}✓ Code updated${NC}"
-echo ""
+echo "=================================================="
+echo "   SWAGA VPN — Deploy"
+echo "=================================================="
 
-echo -e "${YELLOW}Step 3: Installing dependencies...${NC}"
-pip3 install -r requirements.txt --quiet
-echo -e "${GREEN}✓ Dependencies installed${NC}"
-echo ""
+# ── 0. Проверки ────────────────────────────────────────
+[ "$EUID" -eq 0 ] || fail "Запускай от root"
+[ -d "$WORKDIR" ]  || fail "Директория не найдена: $WORKDIR"
+[ -f "$VENV" ]     || fail "venv не найден: $VENV"
+cd "$WORKDIR"
 
-echo -e "${YELLOW}Step 4: Syncing servers...${NC}"
-python3 sync_servers.py --dry-run
-echo ""
-read -p "Apply server sync? (y/n) " -n 1 -r
-echo ""
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    python3 sync_servers.py
-    python3 sync_servers.py --list
-    echo -e "${GREEN}✓ Servers synced${NC}"
+# ── 1. Git pull ────────────────────────────────────────
+step "Обновление кода ($BRANCH)"
+git fetch origin "$BRANCH"
+git checkout "$BRANCH"
+git pull origin "$BRANCH"
+echo "Коммит: $(git log -1 --oneline)"
+ok "Код обновлён"
+
+# ── 2. Зависимости ────────────────────────────────────
+step "Зависимости"
+"$VENV" -m pip install -r requirements.txt -q
+ok "Зависимости установлены"
+
+# ── 3. Перезапуск ботов ───────────────────────────────
+step "Перезапуск сервисов"
+
+# Останавливаем старые nohup-процессы если есть
+pkill -f "python.*bot.py" 2>/dev/null || true
+pkill -f "python.*main.py" 2>/dev/null || true
+sleep 1
+
+if systemctl is-enabled "$BOT_SERVICE" &>/dev/null; then
+    systemctl restart "$BOT_SERVICE"
+    sleep 3
+    if systemctl is-active "$BOT_SERVICE" &>/dev/null; then
+        ok "$BOT_SERVICE запущен"
+    else
+        warn "$BOT_SERVICE не запустился — смотри: journalctl -u $BOT_SERVICE -n 30"
+    fi
 else
-    echo -e "${YELLOW}Skipped server sync${NC}"
-fi
-echo ""
-
-echo -e "${YELLOW}Step 5: Starting bot...${NC}"
-read -p "Start bot with Docker (d) or direct (p)? " -n 1 -r
-echo ""
-
-if [[ $REPLY =~ ^[Dd]$ ]]; then
-    docker-compose up -d
-    echo -e "${GREEN}✓ Bot started in Docker${NC}"
-    echo ""
-    echo "View logs with: docker-compose logs -f vpn-bot"
-else
-    nohup python3 main.py > bot.log 2>&1 &
-    echo -e "${GREEN}✓ Bot started${NC}"
-    echo ""
-    echo "View logs with: tail -f bot.log"
+    warn "$BOT_SERVICE не зарегистрирован в systemd — запускаю напрямую"
+    nohup "$VENV" "$WORKDIR/bot.py" >> "$WORKDIR/bot.log" 2>&1 &
+    sleep 3
+    pgrep -f "python.*bot.py" &>/dev/null && ok "bot.py запущен (PID: $(pgrep -f 'python.*bot.py'))" \
+        || warn "Бот не запустился — смотри: tail -30 $WORKDIR/bot.log"
 fi
 
+if systemctl is-enabled "$SUPPORT_SERVICE" &>/dev/null; then
+    systemctl restart "$SUPPORT_SERVICE"
+    sleep 2
+    systemctl is-active "$SUPPORT_SERVICE" &>/dev/null && ok "$SUPPORT_SERVICE запущен" \
+        || warn "$SUPPORT_SERVICE не запустился"
+fi
+
+# ── 4. Синхронизация клиентов на все серверы ──────────
+step "Синхронизация клиентов на серверы"
+echo "Добавляем/обновляем всех активных пользователей на всех включённых серверах..."
+"$VENV" "$WORKDIR/sync_clients_to_servers.py" && ok "Синхронизация завершена" \
+    || warn "Синхронизация завершилась с ошибками — проверь вывод выше"
+
+# ── 5. Итог ───────────────────────────────────────────
 echo ""
 echo "=================================================="
-echo -e "${GREEN}Deployment completed!${NC}"
+echo -e "${GREEN}   Деплой завершён!${NC}"
 echo "=================================================="
 echo ""
-echo "Quick checks:"
-echo "  - Logs: tail -f bot.log"
-echo "  - Processes: ps aux | grep python"
-echo "  - Servers: python3 sync_servers.py --list"
+echo "Активные серверы:"
+"$VENV" -c "
+import json
+d = json.load(open('servers.json'))
+for s in d['servers']:
+    state = '✅' if s['enabled'] else '⏸'
+    print(f'  {state} {s[\"name\"]:25} {s[\"host\"]}:{s[\"vpn_port\"]}')
+"
+echo ""
+echo "Полезные команды:"
+echo "  Логи бота:     journalctl -u $BOT_SERVICE -f"
+echo "  Логи nohup:    tail -f $WORKDIR/bot.log"
+echo "  Статус:        systemctl status $BOT_SERVICE $SUPPORT_SERVICE"
 echo ""
