@@ -111,28 +111,6 @@
       "reality_fp": "chrome"
     },
     {
-      "id": "ee1",
-      "name": "Эстония",
-      "host": "188.127.247.137",
-      "xui_host": "188.127.247.137",
-      "xui_port": 15343,
-      "xui_web_path": "/sx1pJNsXTCTOldIKOq",
-      "xui_username": "NU0XH7Xpp0",
-      "xui_password": "guSnPgUPWa",
-      "vpn_port": 38628,
-      "inbound_id": 3,
-      "max_users": 150,
-      "priority": 15,
-      "enabled": false,
-      "location": "EE",
-      "transport": "tcp",
-      "flow": "xtls-rprx-vision",
-      "reality_pbk": "WcK145ahsQk6Y0DF6N_QK5CEE3H-QRVLX4DbIIOtrTY",
-      "reality_sid": "d8a39b",
-      "reality_sni": "www.tesla.com",
-      "reality_fp": "chrome"
-    },
-    {
       "id": "uk1",
       "name": "Великобритания",
       "host": "45.95.18.254",
