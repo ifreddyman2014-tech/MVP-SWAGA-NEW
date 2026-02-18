@@ -65,8 +65,10 @@ install_deps() {
 }
 
 # swaga-bot.service использует /usr/bin/python3 (системный)
-install_deps pip3
-ok "Системные зависимости установлены"
+install_deps "pip3 --break-system-packages" 2>/dev/null \
+    || install_deps pip3 2>/dev/null \
+    || warn "pip3: зависимости не обновились (возможно уже установлены — продолжаем)"
+ok "Системные зависимости проверены"
 
 # swaga-support.service использует venv
 if [ -f "$VENV" ]; then
