@@ -1,5 +1,6 @@
 # Bot Framework (aiogram v2)
 aiogram==2.25.2
+aiohttp>=3.9.0  # aiogram dep: old ver fails to compile on Python 3.12 (ob_digit removed)
 
 # SQLAlchemy 2.0 (async ORM)
 sqlalchemy[asyncio]==2.0.36
