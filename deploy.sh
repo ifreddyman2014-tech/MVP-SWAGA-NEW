@@ -55,13 +55,22 @@ ok "Код обновлён"
 # ── 2. Зависимости ────────────────────────────────────
 step "Зависимости"
 
-# swaga-bot.service использует /usr/bin/python3 (системный) — ставим туда
-pip3 install -r requirements.txt -q
+install_deps() {
+    local PIP="$1"
+    # aiogram==2.25.2 требует aiohttp<3.9, которого нет для Python 3.12.
+    # Система уже имеет рабочий aiohttp — устанавливаем aiogram без разрешения
+    # транзитивных зависимостей, а всё остальное — нормально.
+    grep -vE "^aiogram|^#|^$" requirements.txt | $PIP install -q -r /dev/stdin
+    $PIP install aiogram==2.25.2 --no-deps -q
+}
+
+# swaga-bot.service использует /usr/bin/python3 (системный)
+install_deps pip3
 ok "Системные зависимости установлены"
 
-# venv нужен для swaga-support.service — ставим если есть
+# swaga-support.service использует venv
 if [ -f "$VENV" ]; then
-    "$VENV" -m pip install -r requirements.txt -q 2>&1 | grep -v "already satisfied" || true
+    install_deps "$VENV -m pip"
     ok "venv зависимости установлены"
 else
     warn "venv не найден ($VENV) — пропускаю"
