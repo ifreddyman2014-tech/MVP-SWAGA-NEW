@@ -732,6 +732,160 @@ async def cmd_promo_del(message: types.Message) -> None:
         await message.answer(f"❌ Промокод <code>{code}</code> не найден.")
 
 
+@dp.message_handler(commands=["user_info"])
+async def cmd_user_info(message: types.Message) -> None:
+    """
+    Просмотр информации о пользователе и его подписке (только для админов).
+    Формат: /user_info USER_ID
+    Пример: /user_info 123456789
+    """
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("⛔ Эта команда доступна только администраторам.")
+        return
+
+    args = message.get_args().strip()
+    if not args:
+        await message.answer(
+            "❌ Формат: <code>/user_info USER_ID</code>\n\n"
+            "Пример: <code>/user_info 123456789</code>\n"
+            "— Показать информацию о пользователе и его подписке"
+        )
+        return
+
+    try:
+        target_user_id = int(args)
+    except ValueError:
+        await message.answer("❌ USER_ID должен быть числом.")
+        return
+
+    # Получаем информацию о пользователе
+    user = await get_user(target_user_id)
+    if not user:
+        await message.answer(f"❌ Пользователь с ID <code>{target_user_id}</code> не найден в базе.")
+        return
+
+    # Получаем активную подписку
+    sub = await get_active_sub(target_user_id)
+
+    # Формируем сообщение с информацией
+    text = f"👤 <b>Информация о пользователе</b>\n\n"
+    text += f"🆔 ID: <code>{user['user_id']}</code>\n"
+    text += f"👤 Username: @{user['username']}" if user['username'] else f"👤 Username: <i>не указан</i>\n"
+    text += f"\n📅 Регистрация: {format_date(user['reg_date'])}\n"
+    text += f"🎁 Триал использован: {'Да ✅' if user['trial_used'] else 'Нет ❌'}\n\n"
+
+    if sub:
+        # Вычисляем оставшееся время
+        end_date = datetime.fromisoformat(sub['end_date'])
+        now = datetime.utcnow()
+        days_left = (end_date - now).days
+
+        text += f"📦 <b>Активная подписка</b>\n\n"
+        text += f"📋 План: <code>{sub['plan']}</code>\n"
+        text += f"📅 Начало: {format_date(sub['start_date'])}\n"
+        text += f"📅 Окончание: {format_date(sub['end_date'])}\n"
+
+        if days_left > 0:
+            text += f"⏳ Осталось дней: <b>{days_left}</b>\n"
+        elif days_left == 0:
+            text += f"⏳ Истекает сегодня\n"
+        else:
+            text += f"⏳ Просрочена на <b>{abs(days_left)}</b> дней\n"
+
+        text += f"🔑 UUID: <code>{sub['vless_uuid']}</code>\n"
+        if sub['server_id']:
+            text += f"🌐 Сервер: <code>{sub['server_id']}</code>\n"
+    else:
+        text += f"📦 <b>Активная подписка</b>\n\n"
+        text += f"❌ Нет активной подписки\n"
+
+    text += f"\n<i>Управление: /user_extend {target_user_id} ДНЕЙ</i>"
+
+    await message.answer(text)
+
+
+@dp.message_handler(commands=["user_extend"])
+async def cmd_user_extend(message: types.Message) -> None:
+    """
+    Изменить количество дней подписки пользователя (только для админов).
+    Формат: /user_extend USER_ID DAYS
+    Пример: /user_extend 123456789 30 (добавить 30 дней)
+    Пример: /user_extend 123456789 -7 (убрать 7 дней)
+    """
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("⛔ Эта команда доступна только администраторам.")
+        return
+
+    args = message.get_args().split()
+    if len(args) < 2:
+        await message.answer(
+            "❌ Формат: <code>/user_extend USER_ID ДНЕЙ</code>\n\n"
+            "Пример: <code>/user_extend 123456789 30</code>\n"
+            "— Добавить 30 дней к подписке\n\n"
+            "Пример: <code>/user_extend 123456789 -7</code>\n"
+            "— Убрать 7 дней от подписки"
+        )
+        return
+
+    try:
+        target_user_id = int(args[0])
+        days = int(args[1])
+    except ValueError:
+        await message.answer("❌ USER_ID и ДНЕЙ должны быть числами.")
+        return
+
+    # Проверяем существование пользователя
+    user = await get_user(target_user_id)
+    if not user:
+        await message.answer(f"❌ Пользователь с ID <code>{target_user_id}</code> не найден в базе.")
+        return
+
+    # Получаем активную подписку
+    sub = await get_active_sub(target_user_id)
+    if not sub:
+        await message.answer(
+            f"❌ У пользователя <code>{target_user_id}</code> нет активной подписки.\n\n"
+            f"Создайте подписку через покупку или триал."
+        )
+        return
+
+    # Продлеваем/уменьшаем подписку
+    success = await extend_subscription(target_user_id, days)
+
+    if success:
+        # Получаем обновленную подписку для показа новой даты
+        updated_sub = await get_active_sub(target_user_id)
+        end_date = datetime.fromisoformat(updated_sub['end_date'])
+        now = datetime.utcnow()
+        days_left = (end_date - now).days
+
+        action = "добавлено" if days > 0 else "убавлено"
+        await message.answer(
+            f"✅ Подписка пользователя <code>{target_user_id}</code> обновлена!\n\n"
+            f"📅 {action.capitalize()}: <b>{abs(days)}</b> дней\n"
+            f"📅 Новая дата окончания: {format_date(updated_sub['end_date'])}\n"
+            f"⏳ Осталось дней: <b>{days_left}</b>"
+        )
+
+        # Уведомляем пользователя
+        try:
+            user_text = (
+                f"🎁 <b>Ваша подписка обновлена!</b>\n\n"
+                f"Администратор {'добавил' if days > 0 else 'убавил'} <b>{abs(days)}</b> дней к вашей подписке.\n\n"
+                f"📅 Новая дата окончания: {format_date(updated_sub['end_date'])}\n"
+                f"⏳ Осталось дней: <b>{days_left}</b>"
+            )
+            await bot.send_message(target_user_id, user_text)
+        except Exception as e:
+            logger.warning(f"Не удалось уведомить пользователя {target_user_id}: {e}")
+    else:
+        await message.answer(
+            f"❌ Не удалось обновить подписку пользователя <code>{target_user_id}</code>."
+        )
+
+
 @dp.callback_query_handler(lambda c: c.data == "update_access")
 async def cb_update_access(callback: types.CallbackQuery) -> None:
     """Обновить доступ: +7 дней компенсации для платных, активация триала для остальных."""
