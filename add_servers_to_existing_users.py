@@ -97,7 +97,14 @@ async def add_client_to_server(
 
     # Конвертируем end_date в timestamp (миллисекунды)
     try:
-        end_dt = datetime.strptime(user['end_date'], '%Y-%m-%d')
+        end_date_str = user['end_date']
+        # Поддержка разных форматов даты
+        if 'T' in end_date_str:
+            # ISO формат с временем: 2026-03-05T12:13:22.949983
+            end_dt = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
+        else:
+            # Простой формат: 2026-03-05
+            end_dt = datetime.strptime(end_date_str, '%Y-%m-%d')
         expiry_ms = int(end_dt.timestamp() * 1000)
     except Exception as e:
         print(f"      ❌ Ошибка парсинга даты: {e}")
