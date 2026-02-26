@@ -108,8 +108,7 @@
       "reality_pbk": "IjDMxClISYZ_8Vk67AcfU0Nf0ruJnioZY7CBdUsnhS8",
       "reality_sid": "062bff060bc77823",
       "reality_sni": "www.amd.com",
-      "reality_fp": "chrome",
-      "fallback_port": 8080
+      "reality_fp": "chrome"
     },
     {
       "id": "uk1",
