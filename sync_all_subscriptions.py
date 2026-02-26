@@ -55,7 +55,7 @@ async def get_server_clients(
     Returns:
         Список клиентов
     """
-    base_url = f"http://{server['xui_host']}:{server['xui_port']}{server['xui_web_path']}"
+    base_url = f"https://{server['xui_host']}:{server['xui_port']}{server['xui_web_path']}"
 
     print(f"\n{'='*80}")
     print(f"🌍 Сервер: {server['name']} ({server['id']})")

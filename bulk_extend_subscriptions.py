@@ -167,7 +167,7 @@ async def extend_subscription_on_panel(
         return False
 
     # Формируем URL панели
-    base_url = f"http://{server['xui_host']}:{server['xui_port']}{server['xui_web_path']}"
+    base_url = f"https://{server['xui_host']}:{server['xui_port']}{server['xui_web_path']}"
 
     # Конвертируем дату в timestamp
     end_dt = datetime.strptime(new_end_date, "%Y-%m-%d")

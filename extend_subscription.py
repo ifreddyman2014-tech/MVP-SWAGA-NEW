@@ -59,7 +59,7 @@ async def extend_subscription(
         return False
 
     # Формируем URL панели
-    base_url = f"http://{server['xui_host']}:{server['xui_port']}{server['xui_web_path']}"
+    base_url = f"https://{server['xui_host']}:{server['xui_port']}{server['xui_web_path']}"
     username = server['xui_username']
     password = server['xui_password']
     inbound_id = server['inbound_id']
