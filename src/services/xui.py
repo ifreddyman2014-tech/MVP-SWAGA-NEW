@@ -294,6 +294,13 @@ class ThreeXUIClient:
         """
         # Try multiple endpoint variations
         endpoints = [
+            # v2.8.x endpoints
+            "/panel/inbound/list",
+            "/xui/inbound/list",
+            "/api/inbound/list",
+            "/panel/inbound",
+            "/xui/inbound",
+            # v2.4.x endpoints
             "/panel/api/inbounds/list",
             "/xui/api/inbounds/list",
             "/xui/inbounds/list",
@@ -474,6 +481,13 @@ class ThreeXUIClient:
         settings_json_str = json.dumps({"clients": [client_obj]}, ensure_ascii=False)
 
         endpoints = [
+            # v2.8.x endpoints (new style)
+            "/panel/inbound/addClient",
+            "/xui/inbound/addClient",
+            "/api/inbound/addClient",
+            "/panel/inbound/add/client",
+            "/xui/inbound/add/client",
+            # v2.4.x endpoints (old style)
             "/panel/api/inbounds/addClient",
             "/xui/api/inbounds/addClient",
             "/xui/inbounds/addClient",
