@@ -130,7 +130,7 @@ async def add_client_to_server(
         async with client.session():
             print(f"      ✅ Авторизация успешна")
 
-            # Попробуем получить список всех inbound'ов для диагностики
+            # Попытка получить список inbound'ов для диагностики
             try:
                 inbounds = await client.list_inbounds()
                 inbound_ids = [ib.get('id') for ib in inbounds]
@@ -143,25 +143,28 @@ async def add_client_to_server(
                         server['inbound_id'] = inbound_ids[0]
                         print(f"      🔄 Переключились на inbound {server['inbound_id']}")
             except Exception as e:
-                print(f"      ⚠️  Не удалось получить список inbound'ов: {e}")
+                print(f"      ℹ️  Не удалось получить список inbound'ов (используем ID {server['inbound_id']})")
 
-            # Проверяем существует ли клиент
-            existing = await client.find_client_by_email(email, server['inbound_id'])
-            if existing:
-                print(f"      ⏭️  Клиент уже существует на {server['name']}")
+            # Попробуем добавить клиента напрямую (add_client сам проверяет существование)
+            print(f"      🔧 Создание клиента...")
+            try:
+                await client.add_client(
+                    uuid=user['vless_uuid'],
+                    email=email,
+                    expiry_ms=expiry_ms,
+                    inbound_id=server['inbound_id'],
+                    flow=server.get('flow', '')
+                )
+                print(f"      ✅ Клиент создан на {server['name']}")
                 return True
-
-            # Создаём клиента
-            await client.add_client(
-                uuid=user['vless_uuid'],
-                email=email,
-                expiry_ms=expiry_ms,
-                inbound_id=server['inbound_id'],
-                flow=server.get('flow', '')
-            )
-
-            print(f"      ✅ Клиент создан на {server['name']}")
-            return True
+            except Exception as add_error:
+                # Если ошибка содержит "duplicate" или "already exists", считаем что клиент уже есть
+                error_msg = str(add_error).lower()
+                if 'duplicate' in error_msg or 'already exists' in error_msg or 'exist' in error_msg:
+                    print(f"      ⏭️  Клиент уже существует на {server['name']}")
+                    return True
+                else:
+                    raise
 
     except Exception as e:
         print(f"      ❌ Ошибка: {e}")
