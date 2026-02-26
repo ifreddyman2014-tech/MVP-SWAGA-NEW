@@ -61,6 +61,7 @@ class ThreeXUIClient:
         flow: str = "xtls-rprx-vision",
         timeout: int = 30,
         max_retries: int = 3,
+        verify_ssl: bool = False,
     ):
         """
         Initialize 3X-UI client.
@@ -73,6 +74,7 @@ class ThreeXUIClient:
             flow: VLESS flow control (default: xtls-rprx-vision)
             timeout: Request timeout in seconds
             max_retries: Maximum retry attempts
+            verify_ssl: Verify SSL certificates (default: False)
         """
         self.base_url = base_url.rstrip("/")
         self.username = username
@@ -81,6 +83,7 @@ class ThreeXUIClient:
         self.flow = flow
         self.timeout = aiohttp.ClientTimeout(total=timeout, connect=10)
         self.max_retries = max_retries
+        self.verify_ssl = verify_ssl
 
         self._session: Optional[aiohttp.ClientSession] = None
         self._authenticated = False
@@ -94,9 +97,11 @@ class ThreeXUIClient:
     async def session(self):
         """Context manager for session lifecycle."""
         if self._session is None or self._session.closed:
+            connector = aiohttp.TCPConnector(ssl=self.verify_ssl)
             self._session = aiohttp.ClientSession(
                 cookie_jar=aiohttp.CookieJar(unsafe=True),
                 timeout=self.timeout,
+                connector=connector,
             )
             self._authenticated = False
 
