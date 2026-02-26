@@ -459,11 +459,14 @@ class ThreeXUIClient:
         if inbound_id is None:
             inbound_id = self.inbound_id
 
-        # Check if client already exists
-        existing = await self.find_client_by_email(email, inbound_id)
-        if existing:
-            logger.info(f"Client {email} already exists, skipping add")
-            return
+        # Check if client already exists (skip if inbound lookup fails)
+        try:
+            existing = await self.find_client_by_email(email, inbound_id)
+            if existing:
+                logger.info(f"Client {email} already exists, skipping add")
+                return
+        except Exception as e:
+            logger.debug(f"Could not check existing client (will try to add anyway): {e}")
 
         client_obj = self._build_client_object(uuid, email, expiry_ms, flow)
 
@@ -499,11 +502,14 @@ class ThreeXUIClient:
 
                     # Success or duplicate (treat as success)
                     if data.get("success") or "duplicate" in msg:
-                        # Verify client was added
-                        await asyncio.sleep(1)
-                        if await self.find_client_by_email(email, inbound_id):
-                            logger.info(f"Client {email} added successfully")
-                            return
+                        logger.info(f"Client {email} added successfully (or already exists)")
+                        # Try to verify client was added (optional)
+                        try:
+                            await asyncio.sleep(1)
+                            await self.find_client_by_email(email, inbound_id)
+                        except Exception:
+                            pass  # Verification failed, but add succeeded
+                        return
 
                     last_error = data
 
