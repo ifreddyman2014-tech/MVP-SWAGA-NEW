@@ -492,6 +492,7 @@ class ThreeXUIClient:
         for endpoint in endpoints:
             for payload, payload_type in payloads:
                 try:
+                    logger.info(f"Trying {endpoint} with {payload_type}")
                     kwargs = {"json": payload} if payload_type == "json" else {"data": payload}
                     response = await self._request("POST", endpoint, **kwargs)
                     data = await self._parse_response(response, endpoint)
@@ -502,7 +503,7 @@ class ThreeXUIClient:
 
                     # Success or duplicate (treat as success)
                     if data.get("success") or "duplicate" in msg:
-                        logger.info(f"Client {email} added successfully (or already exists)")
+                        logger.info(f"Client {email} added successfully via {endpoint} ({payload_type})")
                         # Try to verify client was added (optional)
                         try:
                             await asyncio.sleep(1)
@@ -512,13 +513,14 @@ class ThreeXUIClient:
                         return
 
                     last_error = data
+                    logger.warning(f"Add client via {endpoint} ({payload_type}) returned: {data}")
 
                 except Exception as e:
                     last_error = e
-                    logger.debug(f"Add client failed via {endpoint}: {e}")
+                    logger.warning(f"Add client failed via {endpoint} ({payload_type}): {type(e).__name__}: {e}")
                     continue
 
-        raise ThreeXUIError(f"Failed to add client {email}: {last_error}")
+        raise ThreeXUIError(f"Failed to add client {email} after trying all endpoints. Last error: {last_error}")
 
     async def update_client_expiry(
         self,
