@@ -5,6 +5,7 @@
 import asyncio
 import sys
 from pathlib import Path
+from datetime import datetime, timedelta
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -70,7 +71,6 @@ async def test_us1():
             test_expiry = int((datetime.now() + timedelta(days=1)).timestamp() * 1000)
 
             try:
-                from datetime import datetime, timedelta
                 await client.add_client(
                     uuid=test_uuid,
                     email=test_email,
