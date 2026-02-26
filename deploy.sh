@@ -1,137 +1,160 @@
 #!/bin/bash
-# SWAGA VPN — одноклик деплой
-# Использование: bash deploy.sh
 
-set -e
+# 🚀 Скрипт деплоя на продакшн
 
+set -e  # Остановить при ошибке
+
+echo "================================================================================"
+echo "🚀 ДЕПЛОЙ SUBSCRIPTION MANAGEMENT НА ПРОДАКШН"
+echo "================================================================================"
+
+# Цвета для вывода
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
-WORKDIR="/root/MVP-SWAGA-NEW"
-VENV="$WORKDIR/venv/bin/python3"
-BRANCH="claude/check-status-bH5rv"
-BOT_SERVICE="swaga-bot"
-SUPPORT_SERVICE="swaga-support"
-
-step() { echo -e "\n${BLUE}▶ $1${NC}"; }
-ok()   { echo -e "${GREEN}✓ $1${NC}"; }
-warn() { echo -e "${YELLOW}⚠ $1${NC}"; }
-fail() { echo -e "${RED}✗ $1${NC}"; exit 1; }
-
-echo "=================================================="
-echo "   SWAGA VPN — Deploy"
-echo "=================================================="
-
-# ── 0. Проверки ────────────────────────────────────────
-[ "$EUID" -eq 0 ] || fail "Запускай от root"
-[ -d "$WORKDIR" ]  || fail "Директория не найдена: $WORKDIR"
-cd "$WORKDIR"
-
-# ── 1. Git pull ────────────────────────────────────────
-step "Обновление кода ($BRANCH)"
-
-# .env хранит боевые credentials — сохраняем и восстанавливаем после pull
-if [ -f "$WORKDIR/.env" ]; then
-    cp "$WORKDIR/.env" /tmp/.env.deploy_backup
-    git checkout -- .env 2>/dev/null || true  # убираем "dirty" флаг, не теряя данные
-fi
-
-git fetch origin "$BRANCH"
-git checkout "$BRANCH"
-git pull origin "$BRANCH"
-
-# Возвращаем боевой .env
-if [ -f /tmp/.env.deploy_backup ]; then
-    cp /tmp/.env.deploy_backup "$WORKDIR/.env"
-    rm /tmp/.env.deploy_backup
-fi
-
-echo "Коммит: $(git log -1 --oneline)"
-ok "Код обновлён"
-
-# ── 2. Зависимости ────────────────────────────────────
-step "Зависимости"
-
-install_deps() {
-    local PIP="$1"
-    # aiogram==2.25.2 требует aiohttp<3.9, которого нет для Python 3.12.
-    # Система уже имеет рабочий aiohttp — устанавливаем aiogram без разрешения
-    # транзитивных зависимостей, а всё остальное — нормально.
-    grep -vE "^aiogram|^#|^$" requirements.txt | $PIP install -q -r /dev/stdin
-    $PIP install aiogram==2.25.2 --no-deps -q
+# Функция для вывода с цветом
+info() {
+    echo -e "${GREEN}✅ $1${NC}"
 }
 
-# swaga-bot.service использует /usr/bin/python3 (системный)
-install_deps "pip3 --break-system-packages" 2>/dev/null \
-    || install_deps pip3 2>/dev/null \
-    || warn "pip3: зависимости не обновились (возможно уже установлены — продолжаем)"
-ok "Системные зависимости проверены"
+warn() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
 
-# swaga-support.service использует venv
-if [ -f "$VENV" ]; then
-    install_deps "$VENV -m pip"
-    ok "venv зависимости установлены"
-else
-    warn "venv не найден ($VENV) — пропускаю"
+error() {
+    echo -e "${RED}❌ $1${NC}"
+}
+
+# Проверка, что находимся в правильной директории
+if [ ! -f "vpn_bot.db" ]; then
+    error "Файл vpn_bot.db не найден! Запустите скрипт из директории проекта."
+    exit 1
 fi
 
-# ── 3. Перезапуск ботов ───────────────────────────────
-step "Перезапуск сервисов"
+# Шаг 1: Бэкап базы данных
+echo ""
+echo "1️⃣ Создание бэкапа базы данных..."
+BACKUP_FILE="vpn_bot.db.backup.$(date +%Y%m%d_%H%M%S)"
+cp vpn_bot.db "$BACKUP_FILE"
+info "Бэкап создан: $BACKUP_FILE"
 
-# Останавливаем старые nohup-процессы если есть
-pkill -f "python.*bot.py" 2>/dev/null || true
-pkill -f "python.*main.py" 2>/dev/null || true
-sleep 1
+# Шаг 2: Проверка текущей ветки
+echo ""
+echo "2️⃣ Проверка git статуса..."
+CURRENT_BRANCH=$(git branch --show-current)
+info "Текущая ветка: $CURRENT_BRANCH"
 
-if systemctl is-enabled "$BOT_SERVICE" &>/dev/null; then
-    systemctl restart "$BOT_SERVICE"
-    sleep 3
-    if systemctl is-active "$BOT_SERVICE" &>/dev/null; then
-        ok "$BOT_SERVICE запущен"
+# Шаг 3: Получение изменений
+echo ""
+echo "3️⃣ Получение изменений из GitHub..."
+git fetch origin
+info "Изменения получены"
+
+# Шаг 4: Merge изменений
+echo ""
+echo "4️⃣ Применение изменений..."
+if [ "$CURRENT_BRANCH" = "main" ] || [ "$CURRENT_BRANCH" = "master" ]; then
+    warn "Вы на ветке main/master"
+    read -p "Хотите смержить claude/check-status-bH5rv? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        git merge origin/claude/check-status-bH5rv
+        info "Изменения смержены"
     else
-        warn "$BOT_SERVICE не запустился — смотри: journalctl -u $BOT_SERVICE -n 30"
+        info "Merge пропущен"
     fi
 else
-    warn "$BOT_SERVICE не зарегистрирован в systemd — запускаю напрямую"
-    nohup /usr/bin/python3 "$WORKDIR/bot.py" >> "$WORKDIR/bot.log" 2>&1 &
-    sleep 3
-    pgrep -f "python.*bot.py" &>/dev/null && ok "bot.py запущен (PID: $(pgrep -f 'python.*bot.py'))" \
-        || warn "Бот не запустился — смотри: tail -30 $WORKDIR/bot.log"
+    git pull origin claude/check-status-bH5rv
+    info "Изменения применены"
 fi
 
-if systemctl is-enabled "$SUPPORT_SERVICE" &>/dev/null; then
-    systemctl restart "$SUPPORT_SERVICE"
-    sleep 2
-    systemctl is-active "$SUPPORT_SERVICE" &>/dev/null && ok "$SUPPORT_SERVICE запущен" \
-        || warn "$SUPPORT_SERVICE не запустился"
+# Шаг 5: Проверка зависимостей
+echo ""
+echo "5️⃣ Проверка Python зависимостей..."
+if command -v pip3 &> /dev/null; then
+    if [ -f "requirements.txt" ]; then
+        pip3 install -r requirements.txt --quiet
+        info "Зависимости обновлены"
+    else
+        warn "requirements.txt не найден, пропускаем"
+    fi
+else
+    warn "pip3 не найден, пропускаем установку зависимостей"
 fi
 
-# ── 4. Синхронизация клиентов на все серверы ──────────
-step "Синхронизация клиентов на серверы"
-echo "Добавляем/обновляем всех активных пользователей на всех включённых серверах..."
-/usr/bin/python3 "$WORKDIR/sync_clients_to_servers.py" && ok "Синхронизация завершена" \
-    || warn "Синхронизация завершилась с ошибками — проверь вывод выше"
+# Шаг 6: Проверка работоспособности
+echo ""
+echo "6️⃣ Проверка работоспособности скриптов..."
+if python3 check_subscriptions_status.py > /dev/null 2>&1; then
+    info "check_subscriptions_status.py работает"
+else
+    error "check_subscriptions_status.py НЕ работает!"
+    exit 1
+fi
 
-# ── 5. Итог ───────────────────────────────────────────
+# Шаг 7: Показать состояние подписок
 echo ""
-echo "=================================================="
-echo -e "${GREEN}   Деплой завершён!${NC}"
-echo "=================================================="
+echo "7️⃣ Текущее состояние подписок:"
+echo "================================================================================"
+python3 check_subscriptions_status.py
+
+# Шаг 8: Спросить о первичном импорте
 echo ""
-echo "Активные серверы:"
-/usr/bin/python3 -c "
-import json
-d = json.load(open('servers.json'))
-for s in d['servers']:
-    state = '✅' if s['enabled'] else '⏸'
-    print(f'  {state} {s[\"name\"]:25} {s[\"host\"]}:{s[\"vpn_port\"]}')
-"
+echo "================================================================================"
+read -p "8️⃣ Хотите импортировать подписки с x-ui панелей? (y/n) " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo "   Dry-run импорта..."
+    python3 sync_all_subscriptions.py --dry-run
+    echo ""
+    read -p "   Продолжить импорт? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        python3 sync_all_subscriptions.py
+        info "Импорт завершён"
+    else
+        info "Импорт отменён"
+    fi
+else
+    info "Импорт пропущен"
+fi
+
+# Шаг 9: Спросить о настройке cron
 echo ""
-echo "Полезные команды:"
-echo "  Логи бота:     journalctl -u $BOT_SERVICE -f"
-echo "  Логи nohup:    tail -f $WORKDIR/bot.log"
-echo "  Статус:        systemctl status $BOT_SERVICE $SUPPORT_SERVICE"
+echo "================================================================================"
+read -p "9️⃣ Хотите настроить автоматическое продление через cron? (y/n) " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo "   Добавьте в crontab:"
+    echo "   crontab -e"
+    echo ""
+    echo "   # Продление каждую неделю (воскресенье в 3:00)"
+    echo "   0 3 * * 0 cd $(pwd) && python3 bulk_extend_subscriptions.py --days-before 14 --extend-days 30 >> /var/log/vpn-extend.log 2>&1"
+    echo ""
+    warn "Настройте cron вручную"
+else
+    info "Настройка cron пропущена"
+fi
+
+# Итог
 echo ""
+echo "================================================================================"
+echo "🎉 ДЕПЛОЙ ЗАВЕРШЁН УСПЕШНО!"
+echo "================================================================================"
+echo ""
+info "Бэкап базы данных: $BACKUP_FILE"
+info "Новые скрипты доступны:"
+echo "   - python3 check_subscriptions_status.py"
+echo "   - python3 bulk_extend_subscriptions.py"
+echo "   - python3 sync_all_subscriptions.py"
+echo ""
+info "Документация:"
+echo "   - cat SUBSCRIPTION_MANAGEMENT.md"
+echo "   - cat QUICKSTART.md"
+echo ""
+warn "Не забудьте продлить UUID на x-ui панели вручную (если нужно)"
+echo ""
+echo "================================================================================"
+
