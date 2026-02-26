@@ -28,7 +28,8 @@ async def test_with_fresh_sessions():
         login_url = f"{base_url}/login"
         async with session.post(
             login_url,
-            json={"username": username, "password": password}
+            json={"username": username, "password": password},
+            timeout=aiohttp.ClientTimeout(total=10)
         ) as resp:
             data = await resp.json()
             print(f"   Response: {data}")
@@ -61,7 +62,7 @@ async def test_with_fresh_sessions():
                                 data = json.loads(text)
                                 if data.get("success"):
                                     print(f"      ✅ Работает! Данные: {text[:100]}")
-                                    return
+                                    # Не выходим, продолжаем тестирование
                                 else:
                                     print(f"      ⚠️ Success=false: {data.get('msg')}")
                             except:
@@ -81,7 +82,8 @@ async def test_with_fresh_sessions():
         # Логин
         async with session.post(
             f"{base_url}/login",
-            json={"username": username, "password": password}
+            json={"username": username, "password": password},
+            timeout=aiohttp.ClientTimeout(total=10)
         ) as resp:
             await resp.json()
 
