@@ -122,11 +122,29 @@ async def add_client_to_server(
         base_url=base_url,
         username=server['xui_username'],
         password=server['xui_password'],
-        inbound_id=server['inbound_id']
+        inbound_id=server['inbound_id'],
+        verify_ssl=False
     )
 
     try:
         async with client.session():
+            print(f"      ✅ Авторизация успешна")
+
+            # Попробуем получить список всех inbound'ов для диагностики
+            try:
+                inbounds = await client.list_inbounds()
+                inbound_ids = [ib.get('id') for ib in inbounds]
+                print(f"      📋 Доступные inbound ID: {inbound_ids}")
+
+                # Проверяем существует ли нужный inbound
+                if server['inbound_id'] not in inbound_ids:
+                    print(f"      ⚠️  Inbound {server['inbound_id']} не найден! Используем первый доступный.")
+                    if inbound_ids:
+                        server['inbound_id'] = inbound_ids[0]
+                        print(f"      🔄 Переключились на inbound {server['inbound_id']}")
+            except Exception as e:
+                print(f"      ⚠️  Не удалось получить список inbound'ов: {e}")
+
             # Проверяем существует ли клиент
             existing = await client.find_client_by_email(email, server['inbound_id'])
             if existing:
@@ -147,6 +165,8 @@ async def add_client_to_server(
 
     except Exception as e:
         print(f"      ❌ Ошибка: {e}")
+        import traceback
+        print(f"      📝 Детали: {traceback.format_exc()}")
         return False
     finally:
         await client.close()
