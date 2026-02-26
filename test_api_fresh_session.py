@@ -71,35 +71,93 @@ async def test_with_fresh_sessions():
                 except Exception as e:
                     print(f"      ❌ Ошибка: {type(e).__name__}: {e}")
 
-    # Шаг 2: Новая сессия с cookies
-    print("\n3️⃣ Попытка с новой сессией но теми же cookies...")
+    # Шаг 2: Попробуем добавить клиента
+    print("\n3️⃣ Тестирование добавления клиента...")
     connector = aiohttp.TCPConnector(ssl=False)
-    cookie_jar = aiohttp.CookieJar(unsafe=True)
-
-    # Попробуем установить cookie вручную
     async with aiohttp.ClientSession(
         connector=connector,
-        cookie_jar=cookie_jar
+        cookie_jar=aiohttp.CookieJar(unsafe=True)
     ) as session:
-        # Сначала логин чтобы получить cookie
+        # Логин
         async with session.post(
             f"{base_url}/login",
             json={"username": username, "password": password}
         ) as resp:
             await resp.json()
 
-        # Теперь пробуем запрос
-        print("   Пробуем /panel/inbound/list...")
-        try:
-            async with session.get(
-                f"{base_url}/panel/inbound/list",
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                text = await resp.text()
-                print(f"   Status: {resp.status}")
-                print(f"   Response: {text[:200]}")
-        except Exception as e:
-            print(f"   ❌ Ошибка: {type(e).__name__}: {e}")
+        # Подготовка данных клиента
+        test_uuid = "99999999-9999-9999-9999-999999999999"
+        test_email = f"test_api_{int(datetime.now().timestamp())}"
+        test_expiry = int((datetime.now() + timedelta(days=1)).timestamp() * 1000)
+
+        # Формируем payload как это делает панель
+        client_data = {
+            "id": test_uuid,
+            "email": test_email,
+            "enable": True,
+            "flow": "xtls-rprx-vision",
+            "limitIp": 0,
+            "totalGB": 0,
+            "expiryTime": test_expiry,
+            "tgId": "",
+            "subId": ""
+        }
+
+        settings_json = json.dumps({"clients": [client_data]}, ensure_ascii=False)
+
+        # Пробуем разные endpoints для добавления
+        add_endpoints = [
+            "/panel/api/inbounds/addClient",
+            "/xui/api/inbounds/addClient",
+            "/panel/inbounds/addClient",
+        ]
+
+        for endpoint in add_endpoints:
+            print(f"\n   Пробуем {endpoint}...")
+
+            payloads = [
+                ("JSON", {"id": 1, "settings": settings_json}),
+                ("FormData", {"id": "1", "settings": settings_json}),
+            ]
+
+            for payload_type, payload in payloads:
+                try:
+                    url = f"{base_url}{endpoint}"
+                    print(f"      {payload_type}...")
+
+                    if payload_type == "JSON":
+                        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                            text = await resp.text()
+                            print(f"         Status: {resp.status}")
+                            if resp.status == 200:
+                                try:
+                                    data = json.loads(text)
+                                    if data.get("success"):
+                                        print(f"         ✅ УСПЕХ! Клиент добавлен: {data}")
+                                        # Удалим тестового клиента
+                                        print(f"         🗑️  Удаляем тестового клиента...")
+                                        return
+                                    else:
+                                        print(f"         ⚠️ Success=false: {data.get('msg')}")
+                                except:
+                                    print(f"         Response: {text[:150]}")
+                    else:
+                        async with session.post(url, data=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                            text = await resp.text()
+                            print(f"         Status: {resp.status}")
+                            if resp.status == 200:
+                                try:
+                                    data = json.loads(text)
+                                    if data.get("success"):
+                                        print(f"         ✅ УСПЕХ! Клиент добавлен: {data}")
+                                        return
+                                    else:
+                                        print(f"         ⚠️ Success=false: {data.get('msg')}")
+                                except:
+                                    print(f"         Response: {text[:150]}")
+
+                except Exception as e:
+                    print(f"         ❌ Ошибка: {type(e).__name__}: {e}")
 
     print("\n" + "="*80)
     print("🏁 ТЕСТ ЗАВЕРШЕН")
