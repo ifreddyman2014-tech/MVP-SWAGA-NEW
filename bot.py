@@ -886,6 +886,213 @@ async def cmd_user_extend(message: types.Message) -> None:
         )
 
 
+@dp.message_handler(commands=["giveaccess"])
+async def cmd_give_access(message: types.Message) -> None:
+    """
+    Выдать или продлить подписку пользователю (только для админов).
+    Формат: /giveaccess USER_ID DAYS
+    Пример: /giveaccess 123456789 30
+    """
+    user_id = message.from_user.id
+    if user_id not in ADMIN_IDS:
+        await message.answer("⛔ Эта команда доступна только администраторам.")
+        return
+
+    args = message.get_args().split()
+    if len(args) < 2:
+        await message.answer(
+            "❌ Формат: <code>/giveaccess USER_ID ДНЕЙ</code>\n\n"
+            "Пример: <code>/giveaccess 123456789 30</code>\n"
+            "— Выдать 30 дней подписки пользователю"
+        )
+        return
+
+    try:
+        target_user_id = int(args[0])
+        days = int(args[1])
+    except ValueError:
+        await message.answer("❌ USER_ID и ДНЕЙ должны быть числами.")
+        return
+
+    if days <= 0:
+        await message.answer("❌ Количество дней должно быть больше 0.")
+        return
+
+    # Проверяем существование пользователя
+    user = await get_user(target_user_id)
+    if not user:
+        # Создаем пользователя если не существует
+        await create_user(target_user_id, "")
+        user = await get_user(target_user_id)
+
+    # Проверяем активную подписку
+    sub = await get_active_sub(target_user_id)
+    now = datetime.utcnow()
+
+    if sub:
+        # У пользователя есть активная подписка - продлеваем
+        success = await extend_subscription(target_user_id, days)
+
+        if success:
+            updated_sub = await get_active_sub(target_user_id)
+            end_date = datetime.fromisoformat(updated_sub['end_date'])
+            days_left = max((end_date - now).days, 0)
+
+            await message.answer(
+                f"✅ Подписка продлена!\n\n"
+                f"👤 Пользователь: <code>{target_user_id}</code>\n"
+                f"➕ Добавлено: <b>{days}</b> дней\n"
+                f"📅 Новая дата окончания: {format_date(updated_sub['end_date'])}\n"
+                f"⏳ Осталось дней: <b>{days_left}</b>"
+            )
+
+            # Уведомляем пользователя
+            try:
+                user_text = (
+                    f"🎁 <b>Подписка обновлена!</b>\n\n"
+                    f"Администратор добавил <b>{days}</b> дней к вашей подписке.\n\n"
+                    f"📅 Новая дата окончания: {format_date(updated_sub['end_date'])}\n"
+                    f"⏳ Осталось дней: <b>{days_left}</b>"
+                )
+                await bot.send_message(target_user_id, user_text)
+            except Exception as e:
+                logger.warning(f"Не удалось уведомить пользователя {target_user_id}: {e}")
+        else:
+            await message.answer(
+                f"❌ Не удалось продлить подписку пользователя <code>{target_user_id}</code>."
+            )
+    else:
+        # Нет активной подписки - создаем новую
+        from servers import server_manager
+
+        if not server_manager.servers:
+            server_manager.load_config()
+
+        # Выбираем лучший сервер
+        servers = server_manager.get_healthy_servers()
+        selected_server = servers[0] if servers else None
+
+        if not selected_server:
+            await message.answer(
+                "❌ Нет доступных серверов для создания подписки.\n"
+                "Проверьте health check серверов."
+            )
+            return
+
+        # Создаем UUID и email для пользователя
+        import uuid as uuid_lib
+        new_uuid = str(uuid_lib.uuid4())
+        email = f"tg_{target_user_id}_{int(now.timestamp())}"
+
+        # Вычисляем дату окончания
+        end_date = now + timedelta(days=days)
+        expiry_ms = int(end_date.timestamp() * 1000)
+
+        # Создаем клиента на сервере
+        try:
+            from xui_api import XUIAPI
+            srv_xui = XUIAPI()
+            protocol = "https" if selected_server.xui_host not in ("127.0.0.1", "localhost") else "http"
+            srv_xui.base_url = f"{protocol}://{selected_server.xui_host}:{selected_server.xui_port}{selected_server.xui_web_path}"
+
+            # Логин
+            login_resp = srv_xui.session.post(
+                f"{srv_xui.base_url}/login",
+                json={"username": selected_server.xui_username, "password": selected_server.xui_password},
+                verify=False,
+                timeout=10,
+            )
+
+            if not login_resp.json().get("success"):
+                await message.answer(
+                    f"❌ Ошибка авторизации на сервере {selected_server.name}."
+                )
+                logger.error(f"Ошибка авторизации на {selected_server.name}")
+                return
+
+            srv_xui._logged_in = True
+
+            # Создаем клиента
+            logger.info(f"Попытка создать ключ на сервере {selected_server.name} ({selected_server.id})")
+            sub_id_value = uuid_lib.uuid4().hex[:16]
+
+            success = srv_xui.add_client(
+                selected_server.inbound_id,
+                new_uuid,
+                email,
+                sub_id=sub_id_value,
+                expiry_time=expiry_ms,
+                flow=selected_server.flow,
+            )
+
+            if not success:
+                await message.answer(
+                    f"❌ Не удалось создать ключ на сервере {selected_server.name}."
+                )
+                logger.error(f"Не удалось создать ключ на {selected_server.name}")
+                return
+
+            logger.info(f"✅ Создан ключ на сервере {selected_server.name} для пользователя {target_user_id}")
+
+            # Сохраняем подписку в БД
+            await create_subscription(
+                user_id=target_user_id,
+                plan="admin_gift",
+                vless_uuid=new_uuid,
+                start_date=now.isoformat(),
+                end_date=end_date.isoformat(),
+                server_id=selected_server.id,
+                xui_email=email,
+                xui_sub_id=sub_id_value,
+            )
+
+            # Синхронизируем с другими серверами
+            other_servers = [s for s in server_manager.get_all_servers() if s.enabled and s.id != selected_server.id]
+            if other_servers:
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    _sync_client_to_other_servers,
+                    new_uuid,
+                    email,
+                    sub_id_value,
+                    expiry_ms,
+                    selected_server.id,
+                    other_servers,
+                )
+
+            days_left = max((end_date - now).days, 0)
+
+            await message.answer(
+                f"✅ Подписка создана!\n\n"
+                f"👤 Пользователь: <code>{target_user_id}</code>\n"
+                f"🎁 Выдано: <b>{days}</b> дней\n"
+                f"🌍 Сервер: {selected_server.name}\n"
+                f"📅 Дата окончания: {format_date(end_date.isoformat())}\n"
+                f"⏳ Осталось дней: <b>{days_left}</b>"
+            )
+
+            # Уведомляем пользователя
+            try:
+                user_text = (
+                    f"🎁 <b>Вам выдана подписка!</b>\n\n"
+                    f"Администратор активировал для вас подписку на <b>{days}</b> дней.\n\n"
+                    f"📅 Действует до: {format_date(end_date.isoformat())}\n"
+                    f"⏳ Осталось дней: <b>{days_left}</b>\n\n"
+                    f"Используйте /start для получения ключей."
+                )
+                await bot.send_message(target_user_id, user_text)
+            except Exception as e:
+                logger.warning(f"Не удалось уведомить пользователя {target_user_id}: {e}")
+
+        except Exception as e:
+            await message.answer(
+                f"❌ Ошибка при создании подписки: {str(e)}"
+            )
+            logger.error(f"Ошибка создания подписки для {target_user_id}: {e}")
+            logger.error(traceback.format_exc())
+
+
 @dp.callback_query_handler(lambda c: c.data == "update_access")
 async def cb_update_access(callback: types.CallbackQuery) -> None:
     """Обновить доступ: +7 дней компенсации для платных, активация триала для остальных."""
