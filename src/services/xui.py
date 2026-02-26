@@ -282,6 +282,43 @@ class ThreeXUIClient:
             "comment": "",
         }
 
+    async def list_inbounds(self) -> List[Dict[str, Any]]:
+        """
+        List all inbounds.
+
+        Returns:
+            List of inbound configuration dicts
+
+        Raises:
+            ThreeXUIError: On failure
+        """
+        # Try multiple endpoint variations
+        endpoints = [
+            "/panel/api/inbounds/list",
+            "/xui/api/inbounds/list",
+            "/xui/inbounds/list",
+            "/panel/inbounds/list",
+            "/panel/api/inbounds",
+            "/xui/api/inbounds",
+        ]
+
+        for endpoint in endpoints:
+            try:
+                response = await self._request("GET", endpoint)
+                data = await self._parse_response(response, endpoint)
+
+                if isinstance(data, dict) and data.get("success"):
+                    # Extract inbounds list
+                    inbounds = data.get("obj") or data.get("data") or []
+                    if isinstance(inbounds, list):
+                        return inbounds
+
+            except Exception as e:
+                logger.debug(f"Failed to list inbounds via {endpoint}: {e}")
+                continue
+
+        raise ThreeXUIError("Failed to list inbounds")
+
     async def get_inbound(self, inbound_id: Optional[int] = None) -> Dict[str, Any]:
         """
         Get inbound configuration.
@@ -297,6 +334,15 @@ class ThreeXUIClient:
         """
         if inbound_id is None:
             inbound_id = self.inbound_id
+
+        # Try to get from list first (more reliable)
+        try:
+            inbounds = await self.list_inbounds()
+            for inbound in inbounds:
+                if inbound.get('id') == inbound_id:
+                    return inbound
+        except Exception as e:
+            logger.debug(f"Failed to get inbound from list: {e}")
 
         # Try multiple endpoint variations
         endpoints = [
