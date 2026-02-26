@@ -93,11 +93,11 @@
       "name": "США",
       "host": "80.76.49.140",
       "xui_host": "80.76.49.140",
-      "xui_port": 61753,
+      "xui_port": 2053,
       "xui_web_path": "/8J0lp7fw3i0SRtKAp6",
       "xui_username": "6v94Sn6w9D",
       "xui_password": "sCIHDcxQF1",
-      "vpn_port": 35887,
+      "vpn_port": 443,
       "inbound_id": 1,
       "max_users": 150,
       "priority": 10,
@@ -108,7 +108,8 @@
       "reality_pbk": "IjDMxClISYZ_8Vk67AcfU0Nf0ruJnioZY7CBdUsnhS8",
       "reality_sid": "062bff060bc77823",
       "reality_sni": "www.amd.com",
-      "reality_fp": "chrome"
+      "reality_fp": "chrome",
+      "fallback_port": 8080
     },
     {
       "id": "uk1",
