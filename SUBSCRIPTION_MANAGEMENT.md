@@ -1,12 +1,102 @@
 # 🔧 Управление подписками SWAGA VPN
 
-Набор скриптов для управления подписками VPN.
+Полный набор скриптов для автоматизации управления подписками VPN.
 
 ---
 
 ## 📋 Доступные скрипты
 
-### 1. `extend_subscription.py` - Автоматическое продление
+### 1. `check_subscriptions_status.py` - Проверка состояния ⭐
+
+**НАЧНИТЕ С ЭТОГО!** Показывает текущее состояние всех подписок.
+
+**Использование:**
+
+```bash
+# Проверить все подписки
+python3 check_subscriptions_status.py
+
+# Проверить только UK сервер
+python3 check_subscriptions_status.py --server uk1
+
+# Показать только истекшие
+python3 check_subscriptions_status.py --show-expired
+
+# Экспорт в CSV
+python3 check_subscriptions_status.py --export-csv subscriptions.csv
+```
+
+**Что показывает:**
+- ✅ Активные подписки
+- ⚠️ Истекающие скоро (< 30 дней)
+- ❌ Истекшие подписки
+- 📊 Статистика по серверам
+- 💡 Рекомендации по продлению
+
+---
+
+### 2. `bulk_extend_subscriptions.py` - Массовое продление ⭐
+
+**САМЫЙ ПОЛЕЗНЫЙ!** Автоматически продлевает множество подписок одной командой.
+
+**Использование:**
+
+```bash
+# Продлить все истекшие подписки на 90 дней
+python3 bulk_extend_subscriptions.py --include-expired --extend-days 90
+
+# Продлить подписки, истекающие в ближайшие 7 дней
+python3 bulk_extend_subscriptions.py --days-before 7 --extend-days 30
+
+# Продлить только UK сервер на год
+python3 bulk_extend_subscriptions.py --server uk1 --extend-days 365
+
+# Посмотреть что будет сделано (dry-run)
+python3 bulk_extend_subscriptions.py --include-expired --dry-run
+
+# Продлить в БД и на x-ui панели
+python3 bulk_extend_subscriptions.py --include-expired --update-panel --extend-days 90
+```
+
+**Параметры:**
+- `--days-before N` - Продлить истекающие в ближайшие N дней
+- `--extend-days N` - На сколько дней продлить
+- `--include-expired` - Включить истекшие подписки
+- `--server SERVER` - Только указанный сервер (uk1, us1, fr1, etc.)
+- `--plan PLAN` - Только указанный план (trial, 1m, 3m, 6m, 12m)
+- `--update-panel` - Обновить даты на x-ui панели (требует доступа)
+- `--dry-run` - Показать что будет сделано, не выполняя
+
+---
+
+### 3. `sync_all_subscriptions.py` - Синхронизация с x-ui
+
+Загружает все подписки со всех x-ui панелей и синхронизирует с базой данных.
+
+**Использование:**
+
+```bash
+# Синхронизировать все серверы
+python3 sync_all_subscriptions.py
+
+# Синхронизировать только UK
+python3 sync_all_subscriptions.py --server uk1
+
+# Посмотреть что будет синхронизировано
+python3 sync_all_subscriptions.py --dry-run
+
+# Обновить существующие подписки
+python3 sync_all_subscriptions.py --update-existing
+```
+
+**Когда использовать:**
+- Вы создали подписки вручную через x-ui панель
+- Нужно загрузить все подписки в базу данных
+- После миграции или восстановления БД
+
+---
+
+### 4. `extend_subscription.py` - Одиночное продление
 
 Автоматически продлевает подписку на x-ui панели и синхронизирует с базой данных.
 
@@ -42,9 +132,9 @@ python3 extend_subscription.py 6c23242d-2d76-4479-9c58-0d53f8153afc
 
 ---
 
-### 2. `sync_subscription_to_db.py` - Ручная синхронизация
+### 5. `sync_subscription_to_db.py` - Ручная синхронизация одной подписки
 
-Добавляет или обновляет подписку в базе данных бота (без изменения x-ui панели).
+Добавляет или обновляет одну подписку в базе данных бота (без изменения x-ui панели).
 
 **Использование:**
 
@@ -76,6 +166,95 @@ python3 sync_subscription_to_db.py 364044145 6c23242d-2d76-4479-9c58-0d53f8153af
 - Вы вручную продлили подписку через веб-интерфейс x-ui
 - Нужно добавить существующую подписку в базу данных
 - Подписка создана вручную и не синхронизирована
+
+---
+
+## 🚀 Типичные сценарии использования
+
+### Сценарий 1: Проверка и продление всех истекших подписок
+
+```bash
+# Шаг 1: Проверить состояние
+python3 check_subscriptions_status.py
+
+# Шаг 2: Продлить все истекшие на 90 дней
+python3 bulk_extend_subscriptions.py --include-expired --extend-days 90
+
+# Шаг 3: Проверить результат
+python3 check_subscriptions_status.py
+```
+
+**Результат:** Все истекшие подписки продлены в базе данных.
+
+---
+
+### Сценарий 2: Автоматическое продление подписок, истекающих скоро
+
+```bash
+# Продлить подписки, истекающие в ближайшие 14 дней, на 30 дней
+python3 bulk_extend_subscriptions.py --days-before 14 --extend-days 30
+```
+
+**Когда использовать:** Запускайте еженедельно через cron для автоматического продления.
+
+---
+
+### Сценарий 3: Импорт всех подписок с x-ui панели
+
+```bash
+# Шаг 1: Посмотреть что будет импортировано
+python3 sync_all_subscriptions.py --dry-run
+
+# Шаг 2: Импортировать
+python3 sync_all_subscriptions.py
+
+# Шаг 3: Проверить результат
+python3 check_subscriptions_status.py
+```
+
+**Когда использовать:** После создания подписок вручную через x-ui панель.
+
+---
+
+### Сценарий 4: Продление с обновлением x-ui панели
+
+```bash
+# Продлить в БД и на панели одновременно
+python3 bulk_extend_subscriptions.py \
+  --include-expired \
+  --extend-days 365 \
+  --update-panel
+```
+
+**⚠️ Требуется:** Прямой доступ к x-ui панелям.
+
+---
+
+### Сценарий 5: Экспорт отчёта о подписках
+
+```bash
+# Экспортировать все подписки в CSV
+python3 check_subscriptions_status.py --export-csv report.csv --show-all
+
+# Только истекшие в CSV
+python3 check_subscriptions_status.py --show-expired --export-csv expired.csv
+```
+
+**Результат:** Файл CSV для анализа в Excel/Google Sheets.
+
+---
+
+### Сценарий 6: Настройка автоматического продления через cron
+
+Добавьте в crontab:
+
+```bash
+# Открыть crontab
+crontab -e
+
+# Добавить задачу: продлевать каждую неделю (воскресенье в 3:00)
+0 3 * * 0 cd /path/to/MVP-SWAGA-NEW && python3 bulk_extend_subscriptions.py --days-before 14 --extend-days 30 >> /var/log/vpn-extend.log 2>&1
+```
 
 ---
 
@@ -267,19 +446,67 @@ python3 sync_subscription_to_db.py 364044145 6c23242d-2d76-4479-9c58-0d53f8153af
 
 ## 🚀 Быстрые команды
 
+### Проверка и мониторинг
+
 ```bash
-# Продлить подписку Великобритания до 5 июля 2026
+# Проверить все подписки
+python3 check_subscriptions_status.py
+
+# Только истекшие
+python3 check_subscriptions_status.py --show-expired
+
+# Экспорт в CSV
+python3 check_subscriptions_status.py --export-csv report.csv
+```
+
+### Массовое продление
+
+```bash
+# Продлить все истекшие на 90 дней
+python3 bulk_extend_subscriptions.py --include-expired --extend-days 90
+
+# Продлить истекающие в ближайшие 7 дней на 30 дней
+python3 bulk_extend_subscriptions.py --days-before 7 --extend-days 30
+
+# Dry-run (посмотреть что будет сделано)
+python3 bulk_extend_subscriptions.py --include-expired --dry-run
+```
+
+### Синхронизация с x-ui
+
+```bash
+# Импортировать все подписки со всех серверов
+python3 sync_all_subscriptions.py
+
+# Только UK сервер
+python3 sync_all_subscriptions.py --server uk1
+
+# Обновить существующие подписки
+python3 sync_all_subscriptions.py --update-existing
+```
+
+### Одиночные операции
+
+```bash
+# Продлить одну подписку до 5 июля 2026
 python3 extend_subscription.py 6c23242d-2d76-4479-9c58-0d53f8153afc --date 2026-07-05 --add-to-db
 
-# Синхронизировать существующую подписку с БД
+# Добавить одну подписку в БД вручную
 python3 sync_subscription_to_db.py 364044145 6c23242d-2d76-4479-9c58-0d53f8153afc 2026-07-05 \
   --sub-id l1ml1zsf3rm7hrt7 --server uk1
+```
 
+### SQL запросы
+
+```bash
 # Проверить подписку в БД
 sqlite3 vpn_bot.db "SELECT * FROM subscriptions WHERE vless_uuid = '6c23242d-2d76-4479-9c58-0d53f8153afc'"
 
-# Проверить все активные подписки
-sqlite3 vpn_bot.db "SELECT xui_sub_id, vless_uuid, end_date FROM subscriptions WHERE is_active = 1"
+# Все активные подписки
+sqlite3 vpn_bot.db "SELECT xui_sub_id, vless_uuid, end_date, server_id FROM subscriptions WHERE is_active = 1"
+
+# Подписки истекающие в ближайшие 7 дней
+sqlite3 vpn_bot.db "SELECT xui_sub_id, end_date FROM subscriptions WHERE date(end_date) <= date('now', '+7 days')"
 ```
 
 ---
