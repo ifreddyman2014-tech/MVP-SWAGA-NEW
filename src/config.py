@@ -1,6 +1,6 @@
 """Application configuration using Pydantic Settings."""
 
-from typing import Optional
+from typing import List, Optional
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     # Telegram Bot
     bot_token: str = Field(..., description="Telegram Bot API token")
     admin_chat_id: Optional[int] = Field(None, description="Admin Telegram chat ID")
+    admin_ids: str = Field("", description="Comma-separated list of admin Telegram IDs")
     support_bot_username: str = Field("SWAGASupport_bot", description="Support bot username")
 
     # 3X-UI Panel
@@ -67,6 +68,20 @@ class Settings(BaseSettings):
     def validate_webhook_base_url(cls, v: str) -> str:
         """Ensure webhook base URL has no trailing slash."""
         return v.rstrip("/")
+
+    @property
+    def admin_id_list(self) -> List[int]:
+        """Parse admin_ids string into a list of integers."""
+        ids: List[int] = []
+        if self.admin_chat_id:
+            ids.append(self.admin_chat_id)
+        for part in self.admin_ids.split(","):
+            part = part.strip()
+            if part.isdigit():
+                admin_id = int(part)
+                if admin_id not in ids:
+                    ids.append(admin_id)
+        return ids
 
     @property
     def yookassa_return_url(self) -> str:

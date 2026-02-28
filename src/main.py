@@ -20,6 +20,7 @@ from fastapi import FastAPI, HTTPException, Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 import uvicorn
 
+from .bot.handlers.admin import router as admin_router
 from .bot.handlers.user import router as user_router
 from .config import settings
 from .database import init_db, close_db, get_session
@@ -64,6 +65,7 @@ async def lifespan(app: FastAPI):
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
+    dp.include_router(admin_router)
     dp.include_router(user_router)
 
     # Set bot commands
@@ -159,13 +161,29 @@ async def yookassa_webhook(
 
 async def setup_bot_commands(bot: Bot):
     """Set bot command menu."""
-    commands = [
+    from aiogram.types import BotCommandScopeChat
+
+    user_commands = [
         BotCommand(command="start", description="Перезапустить"),
         BotCommand(command="buy", description="Купить подписку"),
         BotCommand(command="support", description="Поддержка"),
         BotCommand(command="rules", description="Правила пользования"),
     ]
-    await bot.set_my_commands(commands)
+    await bot.set_my_commands(user_commands)
+
+    admin_commands = user_commands + [
+        BotCommand(command="giveaccess", description="Выдать доступ [user_id] [days]"),
+        BotCommand(command="user_extend", description="Продлить подписку [user_id] [days]"),
+        BotCommand(command="user_info", description="Инфо о пользователе [user_id]"),
+        BotCommand(command="servers", description="Статус серверов"),
+        BotCommand(command="broadcast", description="Рассылка [текст]"),
+    ]
+    for admin_id in settings.admin_id_list:
+        try:
+            await bot.set_my_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
+        except Exception as e:
+            logger.warning(f"Could not set admin commands for {admin_id}: {e}")
+
     logger.info("Bot commands set successfully")
 
 
