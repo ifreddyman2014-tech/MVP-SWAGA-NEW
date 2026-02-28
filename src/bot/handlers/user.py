@@ -4,6 +4,7 @@ User handlers for SWAGA VPN bot - Production version.
 Marketing-focused flows with energetic, problem-solving tone.
 """
 
+import hashlib
 import logging
 import urllib.parse
 from datetime import datetime, timedelta
@@ -184,10 +185,10 @@ def build_vless_link(uuid: str, server: Server) -> str:
         "security": server.security,
         "type": server.network_type,
         "pbk": server.public_key,
-        "fp": server.fingerprint,
+        "fp": server.get_random_fingerprint(),
         "sni": server.domain,
-        "sid": server.get_first_short_id(),
-        "spx": server.spider_x,
+        "sid": server.get_random_short_id(),
+        "spx": server.get_random_spider_x(),
         "flow": server.flow,
     }
 
@@ -199,8 +200,7 @@ def build_vless_link(uuid: str, server: Server) -> str:
         params["mode"] = server.xhttp_mode
 
     query = "&".join([f"{k}={urllib.parse.quote(str(v), safe='/')}" for k, v in params.items() if v])
-    remark = f"SWAGA - {server.name}"
-    tag = urllib.parse.quote(remark, safe="")
+    tag = urllib.parse.quote(server.name, safe="")
 
     return f"vless://{uuid}@{server.host}:{server.port}?{query}#{tag}"
 
@@ -242,9 +242,11 @@ async def generate_keys_for_subscription(
         )
         key = result.scalar_one_or_none()
 
-        email = f"user-{user.telegram_id}"
-
         if not key:
+            # Generate opaque email: first 16 hex chars of SHA-256(uuid:server_id)
+            # Deterministic per user+server, but does not expose Telegram ID in panel logs
+            raw = f"{user.user_uuid}:{server.id}".encode()
+            email = hashlib.sha256(raw).hexdigest()[:16]
             key = Key(
                 subscription_id=subscription.id,
                 server_id=server.id,
@@ -255,6 +257,9 @@ async def generate_keys_for_subscription(
             session.add(key)
             await session.commit()
             await session.refresh(key)
+        else:
+            # Always use the email stored in DB so panel identifier stays stable
+            email = key.email
 
         # Sync to 3X-UI panel
         try:

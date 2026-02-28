@@ -109,6 +109,24 @@ class Server(Base):
         """Get the first short_id from comma-separated list."""
         return self.short_ids.split(",")[0].strip() if self.short_ids else ""
 
+    def get_random_short_id(self) -> str:
+        """Pick a random short_id from comma-separated list."""
+        import random
+        ids = [s.strip() for s in self.short_ids.split(",") if s.strip()]
+        return random.choice(ids) if ids else ""
+
+    def get_random_fingerprint(self) -> str:
+        """Pick a random TLS fingerprint from comma-separated list (e.g. 'chrome,firefox,safari')."""
+        import random
+        fps = [f.strip() for f in self.fingerprint.split(",") if f.strip()]
+        return random.choice(fps) if fps else "chrome"
+
+    def get_random_spider_x(self) -> str:
+        """Pick a random spiderX path from comma-separated list (e.g. '/,/favicon.ico,/robots.txt')."""
+        import random
+        paths = [p.strip() for p in self.spider_x.split(",") if p.strip()]
+        return random.choice(paths) if paths else "/"
+
 
 class Subscription(Base):
     """Subscription model - represents a user's active subscription."""
