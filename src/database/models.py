@@ -135,6 +135,11 @@ class Subscription(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
+    # Public token for subscription URL (safe to expose)
+    sub_token: Mapped[str] = mapped_column(
+        String(36), unique=True, nullable=False, index=True, default=lambda: str(uuid4())
+    )
+
     # Foreign keys
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 

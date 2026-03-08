@@ -52,11 +52,39 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db() -> None:
-    """Initialize database - create all tables."""
+    """Initialize database - create all tables and run column migrations."""
     logger.info("Initializing database...")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _migrate_add_sub_token(conn)
     logger.info("Database initialized successfully")
+
+
+async def _migrate_add_sub_token(conn) -> None:
+    """Add sub_token column to subscriptions if it doesn't exist yet."""
+    from sqlalchemy import text
+    result = await conn.execute(text(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name='subscriptions' AND column_name='sub_token'"
+    ))
+    if result.fetchone():
+        return  # Already migrated
+
+    logger.info("Migration: adding sub_token to subscriptions...")
+    await conn.execute(text(
+        "ALTER TABLE subscriptions ADD COLUMN sub_token VARCHAR(36)"
+    ))
+    # Fill existing rows with unique UUIDs
+    await conn.execute(text(
+        "UPDATE subscriptions SET sub_token = gen_random_uuid()::text WHERE sub_token IS NULL"
+    ))
+    await conn.execute(text(
+        "ALTER TABLE subscriptions ALTER COLUMN sub_token SET NOT NULL"
+    ))
+    await conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_subscriptions_sub_token ON subscriptions(sub_token)"
+    ))
+    logger.info("Migration: sub_token added successfully")
 
 
 async def close_db() -> None:

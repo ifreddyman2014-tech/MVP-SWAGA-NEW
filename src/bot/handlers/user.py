@@ -205,10 +205,11 @@ def build_vless_link(uuid: str, server: Server) -> str:
     return f"vless://{uuid}@{server.host}:{server.port}?{query}#{tag}"
 
 
-def build_v2raytun_deeplink(vless_url: str) -> str:
-    """Build v2raytun:// deep link for one-click setup."""
-    encoded_url = urllib.parse.quote(vless_url, safe="")
-    return f"v2raytun://install-config?url={encoded_url}&name=SWAGA"
+def build_subscription_deeplink(sub_token: str) -> str:
+    """Build v2raytun://import deep link for subscription-based one-click setup."""
+    sub_url = f"{settings.webhook_base_url}/sub/{sub_token}"
+    encoded = urllib.parse.quote(sub_url, safe="")
+    return f"v2raytun://import/{encoded}"
 
 
 async def generate_keys_for_subscription(
@@ -593,7 +594,7 @@ async def trial_get(callback: CallbackQuery, session: AsyncSession):
             raise RuntimeError("No VLESS links generated")
 
         # Build deeplink
-        deeplink = build_v2raytun_deeplink(vless_links[0])
+        deeplink = build_subscription_deeplink(subscription.sub_token)
 
         # Send success message
         await callback.message.answer(
@@ -691,7 +692,7 @@ async def access_show_keys(callback: CallbackQuery, session: AsyncSession):
         vless_links.append(build_vless_link(key.key_uuid, server))
 
     # Build deeplink
-    deeplink = build_v2raytun_deeplink(vless_links[0])
+    deeplink = build_subscription_deeplink(subscription.sub_token)
 
     # Format message
     expiry_str = format_date(subscription.expiry_date)

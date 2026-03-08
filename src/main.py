@@ -8,6 +8,7 @@ Combines:
 """
 
 import asyncio
+import base64
 import logging
 import sys
 from contextlib import asynccontextmanager
@@ -17,6 +18,8 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi.responses import Response, HTMLResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import uvicorn
 
@@ -117,6 +120,173 @@ async def get_db_session(request: Request) -> AsyncSession:
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok", "service": "swaga-vpn-bot"}
+
+
+@app.get("/sub/{sub_token}")
+async def subscription_feed(sub_token: str, session: AsyncSession = Depends(get_db_session)):
+    """
+    Subscription endpoint for V2RayTun, Happ, FlClashX, etc.
+
+    Returns base64-encoded VLESS links with profile headers.
+    V2RayTun displays profile-web-page-url as a clickable link under the subscription name.
+    """
+    from .database.models import Subscription, Key, Server
+
+    result = await session.execute(
+        select(Subscription).where(Subscription.sub_token == sub_token)
+    )
+    subscription = result.scalar_one_or_none()
+
+    if not subscription or not subscription.is_active:
+        raise HTTPException(status_code=404, detail="Subscription not found or inactive")
+
+    # Get all keys with their servers
+    result = await session.execute(
+        select(Key, Server)
+        .join(Server, Key.server_id == Server.id)
+        .where(Key.subscription_id == subscription.id)
+        .where(Server.is_active == True)
+    )
+    keys_servers = result.all()
+
+    if not keys_servers:
+        raise HTTPException(status_code=404, detail="No active keys found")
+
+    # Build VLESS links
+    from .bot.handlers.user import build_vless_link
+    vless_links = [build_vless_link(key.key_uuid, server) for key, server in keys_servers]
+
+    # Base64 encode
+    content = base64.b64encode("\n".join(vless_links).encode()).decode()
+
+    # Expiry as unix timestamp
+    expire_ts = int(subscription.expiry_date.timestamp())
+
+    headers = {
+        "profile-title": "SWAGA VPN",
+        "profile-web-page-url": f"https://t.me/{settings.bot_username}",
+        "profile-update-interval": "12",
+        "content-disposition": 'attachment; filename="SWAGA-VPN"',
+        "subscription-userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
+    }
+
+    return Response(content=content, media_type="text/plain; charset=utf-8", headers=headers)
+
+
+@app.get("/connect/{sub_token}", response_class=HTMLResponse)
+async def connect_page(sub_token: str, session: AsyncSession = Depends(get_db_session)):
+    """Web page for end users — subscription info + install instructions."""
+    from datetime import datetime
+    from .database.models import Subscription, User
+
+    result = await session.execute(
+        select(Subscription, User)
+        .join(User, Subscription.user_id == User.id)
+        .where(Subscription.sub_token == sub_token)
+    )
+    row = result.first()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    subscription, user = row
+    sub_url = f"{settings.webhook_base_url}/sub/{sub_token}"
+    import urllib.parse
+    import_link = f"v2raytun://import/{urllib.parse.quote(sub_url, safe='')}"
+
+    now = datetime.utcnow()
+    is_active = subscription.is_active and subscription.expiry_date > now
+    status_label = "Активна" if is_active else "Истекла"
+    status_color = "#4caf50" if is_active else "#f44336"
+    days_left = max((subscription.expiry_date - now).days, 0) if is_active else 0
+    expiry_str = subscription.expiry_date.strftime("%d.%m.%Y")
+    username_display = user.username or str(user.telegram_id)
+
+    html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWAGA VPN</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{background:#0f0f13;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;padding:16px}}
+  .wrap{{max-width:480px;margin:0 auto}}
+  header{{display:flex;align-items:center;justify-content:space-between;padding:20px 0 24px}}
+  .logo{{font-size:20px;font-weight:700;color:#fff;letter-spacing:.5px}}
+  .tg-link{{color:#64b5f6;text-decoration:none;font-size:14px;display:flex;align-items:center;gap:6px}}
+  .card{{background:#1c1c24;border-radius:16px;padding:20px;margin-bottom:16px}}
+  .card-header{{display:flex;align-items:center;gap:12px;margin-bottom:16px}}
+  .status-dot{{width:10px;height:10px;border-radius:50%;background:{status_color};flex-shrink:0}}
+  .card-title{{font-size:16px;font-weight:600;color:#fff}}
+  .card-sub{{font-size:13px;color:#888;margin-top:2px}}
+  .grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
+  .info-box{{background:#252530;border-radius:10px;padding:14px}}
+  .info-label{{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}}
+  .info-value{{font-size:14px;font-weight:600;color:#e0e0e0}}
+  .info-value.green{{color:{status_color}}}
+  h2{{font-size:15px;font-weight:600;color:#fff;margin-bottom:14px}}
+  .btn{{display:block;width:100%;padding:14px;border-radius:12px;font-size:15px;font-weight:600;text-align:center;text-decoration:none;cursor:pointer;border:none;margin-bottom:10px}}
+  .btn-primary{{background:#1976d2;color:#fff}}
+  .btn-outline{{background:transparent;color:#64b5f6;border:1px solid #1976d2}}
+  .copy-wrap{{position:relative}}
+  .copy-input{{width:100%;background:#1c1c24;border:1px solid #333;border-radius:10px;padding:12px 44px 12px 12px;color:#aaa;font-size:12px;font-family:monospace;word-break:break-all;outline:none}}
+  .copy-btn{{position:absolute;right:10px;top:50%;transform:translateY(-50%);background:none;border:none;color:#64b5f6;cursor:pointer;font-size:18px;padding:4px}}
+  .section{{background:#1c1c24;border-radius:16px;padding:20px;margin-bottom:16px}}
+  .hint{{font-size:12px;color:#666;margin-top:8px;line-height:1.5}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="logo">&#x1F5A7; SWAGA VPN</span>
+    <a class="tg-link" href="https://t.me/{settings.bot_username}" target="_blank">
+      &#9992; @{settings.bot_username}
+    </a>
+  </header>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="status-dot"></div>
+      <div>
+        <div class="card-title">{username_display}</div>
+        <div class="card-sub">Истекает через {days_left} дн.</div>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="info-box">
+        <div class="info-label">Имя пользователя</div>
+        <div class="info-value">{username_display}</div>
+      </div>
+      <div class="info-box">
+        <div class="info-label">Статус</div>
+        <div class="info-value green">{status_label}</div>
+      </div>
+      <div class="info-box">
+        <div class="info-label">Истекает</div>
+        <div class="info-value">{expiry_str}</div>
+      </div>
+      <div class="info-box">
+        <div class="info-label">Трафик</div>
+        <div class="info-value">∞</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Установка</h2>
+    <a class="btn btn-primary" href="{import_link}">+ Добавить подписку</a>
+    <div class="copy-wrap">
+      <input class="copy-input" id="sub-url" readonly value="{sub_url}">
+      <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('sub-url').value).then(()=>this.textContent='✓')" title="Скопировать">&#x2398;</button>
+    </div>
+    <p class="hint">Если кнопка не сработала — скопируй ссылку и добавь вручную в настройках приложения (раздел «Подписки»).</p>
+  </div>
+</div>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html)
 
 
 @app.post(settings.webhook_path)
