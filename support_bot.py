@@ -76,6 +76,7 @@ def support_and_back() -> types.InlineKeyboardMarkup:
 
 
 INSTRUCTION_VIDEO = os.path.join(os.path.dirname(__file__), "media", "instruction.mp4")
+SUPPORT_LOGO = os.path.join(os.path.dirname(__file__), "media", "support_logo.png")
 
 WELCOME_TEXT = (
     "👋 <b>Добро пожаловать в поддержку SWAGA VPN!</b>\n\n"
@@ -89,7 +90,11 @@ WELCOME_TEXT = (
 @dp.message_handler(commands=["start"], state="*")
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.finish()
-    await message.answer(WELCOME_TEXT, reply_markup=main_menu())
+    if os.path.exists(SUPPORT_LOGO):
+        with open(SUPPORT_LOGO, "rb") as photo:
+            await message.answer_photo(photo, caption=WELCOME_TEXT, reply_markup=main_menu())
+    else:
+        await message.answer(WELCOME_TEXT, reply_markup=main_menu())
 
 
 # ── Назад ─────────────────────────────────────────────────────────────────────
