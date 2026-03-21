@@ -74,8 +74,9 @@ def back_and_main(url: str | None = None) -> InlineKeyboardMarkup:
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
     await message.answer(
-        "👋 <b>Привет! Я бот поддержки SWAGA VPN.</b>\n\n"
-        "Выбери нужный раздел:",
+        "👋 <b>Добро пожаловать в поддержку SWAGA VPN!</b>\n\n"
+        "Выберите тему вопроса из меню ниже.\n"
+        "Если не нашли ответ — напишите оператору.",
         reply_markup=main_menu(),
         parse_mode="HTML",
     )
@@ -87,8 +88,9 @@ async def cmd_start(message: Message, state: FSMContext):
 async def cb_back(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.message.edit_text(
-        "👋 <b>Привет! Я бот поддержки SWAGA VPN.</b>\n\n"
-        "Выбери нужный раздел:",
+        "👋 <b>Добро пожаловать в поддержку SWAGA VPN!</b>\n\n"
+        "Выберите тему вопроса из меню ниже.\n"
+        "Если не нашли ответ — напишите оператору.",
         reply_markup=main_menu(),
         parse_mode="HTML",
     )
