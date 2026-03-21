@@ -75,6 +75,8 @@ def support_and_back() -> types.InlineKeyboardMarkup:
     return kb
 
 
+INSTRUCTION_VIDEO = os.path.join(os.path.dirname(__file__), "media", "instruction.mp4")
+
 WELCOME_TEXT = (
     "👋 <b>Добро пожаловать в поддержку SWAGA VPN!</b>\n\n"
     "Выберите тему вопроса из меню ниже.\n"
@@ -108,7 +110,7 @@ async def cb_how_to_connect(call: types.CallbackQuery):
         "<b>Шаг 1.</b> Установи приложение:\n"
         "• <b>iOS / macOS</b> — <a href='https://apps.apple.com/app/v2raytun/id6476628951'>V2RayTun</a>\n"
         "• <b>Android</b> — <a href='https://play.google.com/store/apps/details?id=com.v2raytun.android'>V2RayTun</a>\n"
-        "• <b>Windows</b> — <a href='https://github.com/hiddify/hiddify-next/releases'>Hiddify</a>\n\n"
+        "• <b>Windows</b> — <a href='https://github.com/2dust/v2rayn/releases'>V2RayN</a>\n\n"
         f"<b>Шаг 2.</b> Открой ссылку подключения из @{MAIN_BOT_USERNAME}\n"
         "(<i>Мой профиль → Подключить</i>)\n\n"
         "<b>Шаг 3.</b> Нажми <b>«Подключить»</b> — конфиг импортируется автоматически\n\n"
@@ -117,6 +119,13 @@ async def cb_how_to_connect(call: types.CallbackQuery):
         reply_markup=back_btn(),
         disable_web_page_preview=True,
     )
+    # Отправляем видео-инструкцию если файл есть
+    if os.path.exists(INSTRUCTION_VIDEO):
+        with open(INSTRUCTION_VIDEO, "rb") as video:
+            await call.message.answer_video(
+                video,
+                caption="🎬 <b>Видео-инструкция по подключению</b>",
+            )
     await call.answer()
 
 
