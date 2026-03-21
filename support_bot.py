@@ -124,7 +124,7 @@ async def cb_how_to_connect(call: types.CallbackQuery):
         with open(INSTRUCTION_VIDEO, "rb") as video:
             await call.message.answer_video(
                 video,
-                caption="🎬 <b>Видео-инструкция по подключению</b>",
+                caption="🎬 <b>Видео-инструкция по подключению с компьютера (Windows)</b>",
             )
     await call.answer()
 
