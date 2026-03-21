@@ -102,7 +102,12 @@ async def cmd_start(message: types.Message, state: FSMContext):
 @dp.callback_query_handler(lambda c: c.data == "back", state="*")
 async def cb_back(call: types.CallbackQuery, state: FSMContext):
     await state.finish()
-    await call.message.edit_text(WELCOME_TEXT, reply_markup=main_menu())
+    await call.message.delete()
+    if os.path.exists(SUPPORT_LOGO):
+        with open(SUPPORT_LOGO, "rb") as photo:
+            await call.message.answer_photo(photo, caption=WELCOME_TEXT, reply_markup=main_menu())
+    else:
+        await call.message.answer(WELCOME_TEXT, reply_markup=main_menu())
     await call.answer()
 
 
