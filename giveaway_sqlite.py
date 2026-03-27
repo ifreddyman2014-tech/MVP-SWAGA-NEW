@@ -29,8 +29,7 @@ SERVERS_JSON  = os.getenv("SERVERS_JSON",  "./servers.json")
 SUB_BASE_URL  = os.getenv("SUB_BASE_URL",  "")   # например: https://sub.swaga-vpn.ru/sub/
 
 GIVEAWAY_PLANS = [
-    ("1m",  30,  5),
-    ("1y", 365,  5),
+    ("7d",  7,  3),
 ]
 
 GIVEAWAY_USER_ID_START = 9_000_000_000
@@ -208,7 +207,7 @@ async def main():
         next_id = await get_next_giveaway_id(db)
 
         for plan, days, count in GIVEAWAY_PLANS:
-            label = "1 месяц" if plan == "1m" else "1 год"
+            label = f"{days} дн."
             print(f"📦 Создаю {count} аккаунтов [{label}]...")
 
             for i in range(count):
@@ -230,17 +229,15 @@ async def main():
     print("=" * 60)
 
     for i, acc in enumerate(results, 1):
-        label = "1 месяц" if acc["plan"] == "1m" else "1 год"
         print(f"\n{'─' * 50}")
-        print(f"#{i} | {label} | до {acc['end_date']}")
+        print(f"#{i} | {acc['days']} дн. | до {acc['end_date']}")
         if acc["connect_url"]:
             print(f"🔗 Быстрое подключение:\n   {acc['connect_url']}")
         print(f"📋 Ссылка на подписку:\n   {acc['sub_url']}")
 
     print(f"\n{'=' * 60}")
     print(f"Итого создано: {len(results)} аккаунтов")
-    print(f"  • {sum(1 for a in results if a['plan'] == '1m')} × 1 месяц")
-    print(f"  • {sum(1 for a in results if a['plan'] == '1y')} × 1 год")
+    print(f"  • {len(results)} × 7 дней")
 
 
 if __name__ == "__main__":
