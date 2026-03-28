@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """
 Патч: добавляет вкладки Happ и Hiddify на страницу /connect/ в sub_app.py.
+- Happ: deep link через crypto.happ.su/api-v2.php (RSA-зашифрованный happ://crypt4/...)
+- Hiddify: deep link hiddify://install-sub/?url=...
 Запуск: python3 patch_happ.py
 """
 import shutil
@@ -8,6 +10,8 @@ import sys
 from pathlib import Path
 
 SUB_APP = Path(__file__).parent / "sub_app.py"
+
+# ── Новый HTML шаблон ──────────────────────────────────────────────────────────
 
 NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
 <html lang="ru">
@@ -100,15 +104,20 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
 
 <!-- ── Happ ── -->
 <div id="tab-happ" class="tab-content">
-  <button class="btn btn-happ" onclick="copySubUrl('copyHintHapp', this)">
+  {happ_btn}
+  <p class="hint">Нажмите, чтобы автоматически открыть Happ</p>
+
+  <p class="or">— или —</p>
+
+  <button class="btn btn-secondary" onclick="copySubUrl('copyHintHapp', this)">
     &#x1F4CB; Скопировать ссылку подписки
   </button>
-  <p class="hint" id="copyHintHapp">Нажмите — ссылка скопируется в буфер</p>
+  <p class="hint" id="copyHintHapp"></p>
 
   <div class="step">
-    <p style="color:#8b949e; font-size:14px; margin:0 0 10px;">Как добавить в Happ:</p>
+    <p style="color:#8b949e; font-size:14px; margin:0 0 10px;">Если автоматически не открылось:</p>
     <div class="step-row"><span class="step-num">1</span>
-      <span class="step-text">Нажмите кнопку выше — ссылка скопируется</span></div>
+      <span class="step-text">Нажмите <b>«Скопировать ссылку»</b></span></div>
     <div class="step-row"><span class="step-num">2</span>
       <span class="step-text">Откройте <b>Happ</b> → раздел <b>Подписки</b></span></div>
     <div class="step-row"><span class="step-num">3</span>
@@ -207,17 +216,61 @@ function fallback(text, btn, hint, successHint) {{
 </body>
 </html>"""'''
 
+# ── Вспомогательная функция для Happ API ──────────────────────────────────────
+
+HAPP_HELPER = '''
+
+async def _get_happ_deeplink(sub_url: str) -> str:
+    """Получить зашифрованный Happ deep link через crypto.happ.su API."""
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.post(
+                "https://crypto.happ.su/api-v2.php",
+                json={"url": sub_url},
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    text = text.strip().strip('"')
+                    if text.startswith("happ://"):
+                        return text
+                    # попробуем JSON
+                    import json as _json
+                    try:
+                        data = _json.loads(text)
+                        for key in ("link", "deep_link", "deeplink", "url", "result"):
+                            if key in data and str(data[key]).startswith("happ://"):
+                                return str(data[key])
+                    except Exception:
+                        pass
+    except Exception as e:
+        logging.warning(f"Happ API error: {e}")
+    return ""
+
+'''
+
+# ── Изменения в handle_connect ─────────────────────────────────────────────────
+
 OLD_DEEPLINK = '    deeplink = f"v2raytun://import/{sub_url}"'
 NEW_DEEPLINK = (
     '    deeplink = f"v2raytun://import/{sub_url}"\n'
-    '    hiddify_deeplink = f"hiddify://install-sub/?url={sub_url}"'
+    '    hiddify_deeplink = f"hiddify://install-sub/?url={sub_url}"\n'
+    '    happ_crypto = await _get_happ_deeplink(sub_url)\n'
+    '    happ_btn = (\n'
+    '        f\'<a class="btn btn-happ" href="{happ_crypto}">&#x1F7E3; Открыть в Happ</a>\'\n'
+    '        if happ_crypto else\n'
+    '        \'<button class="btn btn-happ" onclick="copySubUrl(\\\'copyHintHapp\\\', this)">&#x1F4CB; Скопировать ссылку для Happ</button>\'\n'
+    '    )'
 )
 
 OLD_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink)'
-NEW_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink, hiddify_deeplink=hiddify_deeplink)'
+NEW_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink, hiddify_deeplink=hiddify_deeplink, happ_btn=happ_btn)'
 
 OLD_HTML_START = 'CONNECT_HTML = """<!DOCTYPE html>'
 OLD_HTML_END = '</html>"""'
+
+# Маркер для вставки helper-функции (перед handle_connect)
+HANDLE_CONNECT_MARKER = '@routes.get("/connect/{sub_id}")'
 
 
 def main():
@@ -239,13 +292,23 @@ def main():
     shutil.copy2(SUB_APP, backup)
     print(f"✅ Бэкап сохранён: {backup}")
 
+    # 1. Заменяем HTML блок
     start = source.index(OLD_HTML_START)
     end = source.index(OLD_HTML_END, start) + len(OLD_HTML_END)
     source = source[:start] + NEW_HTML + source[end:]
+    print("✅ HTML шаблон заменён")
 
+    # 2. Добавляем helper-функцию перед handle_connect
+    if HANDLE_CONNECT_MARKER in source:
+        source = source.replace(HANDLE_CONNECT_MARKER, HAPP_HELPER + HANDLE_CONNECT_MARKER, 1)
+        print("✅ Добавлена функция _get_happ_deeplink()")
+    else:
+        print(f"⚠️  Маркер '{HANDLE_CONNECT_MARKER}' не найден — добавьте _get_happ_deeplink() вручную")
+
+    # 3. Обновляем строки в handle_connect
     if OLD_DEEPLINK in source:
         source = source.replace(OLD_DEEPLINK, NEW_DEEPLINK, 1)
-        print("✅ Добавлена переменная hiddify_deeplink")
+        print("✅ Добавлены hiddify_deeplink и happ_btn")
     else:
         print("⚠️  Строка deeplink не найдена — проверьте вручную")
 
@@ -256,7 +319,7 @@ def main():
         print("⚠️  Строка format() не найдена — проверьте вручную")
 
     SUB_APP.write_text(source, encoding="utf-8")
-    print("✅ Патч применён: вкладки Happ и Hiddify добавлены на страницу /connect/")
+    print("\n✅ Патч применён успешно!")
     print("👉 Перезапустите сервис: systemctl restart vpnbot")
 
 
