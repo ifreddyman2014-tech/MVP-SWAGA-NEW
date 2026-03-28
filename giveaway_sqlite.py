@@ -19,8 +19,10 @@ from datetime import datetime, timedelta
 import aiosqlite
 import requests
 import urllib3
+from dotenv import load_dotenv
 
 urllib3.disable_warnings()
+load_dotenv()
 
 # ── Настройки ──────────────────────────────────────────────────────────────────
 
