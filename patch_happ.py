@@ -105,16 +105,16 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
 <!-- ── Happ ── -->
 <div id="tab-happ" class="tab-content">
   <button class="btn btn-happ" onclick="copyConfigAndOpenHapp(this)">
-    &#x1F7E3; Скопировать и открыть Happ
+    &#x1F4CB; Скопировать конфиг для Happ
   </button>
-  <p class="hint" id="happHint">Нажмите — конфиг скопируется и Happ откроется сам</p>
+  <p class="hint" id="happHint">Нажмите — конфиг скопируется в буфер обмена</p>
 
   <div class="step">
-    <p style="color:#8b949e; font-size:14px; margin:0 0 10px;">Как это работает:</p>
+    <p style="color:#8b949e; font-size:14px; margin:0 0 10px;">Как подключить:</p>
     <div class="step-row"><span class="step-num">1</span>
       <span class="step-text">Нажмите кнопку выше — конфиг скопируется</span></div>
     <div class="step-row"><span class="step-num">2</span>
-      <span class="step-text">Happ откроется автоматически</span></div>
+      <span class="step-text">Откройте <b>Happ</b></span></div>
     <div class="step-row"><span class="step-num">3</span>
       <span class="step-text">Приложение предложит <b>импортировать</b> из буфера</span></div>
   </div>
@@ -184,25 +184,26 @@ function copySubUrl(hintId, btn) {{
 function copyConfigAndOpenHapp(btn) {{
   var config = document.getElementById('configData').value;
   var hint = document.getElementById('happHint');
-  function openHapp() {{
-    btn.innerHTML = '&#x2705; Скопировано — открываю Happ...';
-    hint.textContent = 'Если Happ не открылся — откройте вручную';
-    setTimeout(function() {{ window.location.href = 'happ://'; }}, 300);
+  function onCopied() {{
+    btn.innerHTML = '&#x2705; Конфиг скопирован!';
+    hint.textContent = 'Теперь откройте Happ — он предложит импорт';
   }}
   if (navigator.clipboard && navigator.clipboard.writeText) {{
-    navigator.clipboard.writeText(config).then(openHapp).catch(function() {{
+    navigator.clipboard.writeText(config).then(onCopied).catch(function() {{
       var inp = document.createElement('textarea');
       inp.value = config; document.body.appendChild(inp); inp.select();
-      try {{ document.execCommand('copy'); }} catch(e) {{}}
+      try {{ document.execCommand('copy'); onCopied(); }} catch(e) {{
+        hint.textContent = 'Не удалось скопировать — попробуйте вручную';
+      }}
       document.body.removeChild(inp);
-      openHapp();
     }});
   }} else {{
     var inp = document.createElement('textarea');
     inp.value = config; document.body.appendChild(inp); inp.select();
-    try {{ document.execCommand('copy'); }} catch(e) {{}}
+    try {{ document.execCommand('copy'); onCopied(); }} catch(e) {{
+      hint.textContent = 'Не удалось скопировать — попробуйте вручную';
+    }}
     document.body.removeChild(inp);
-    openHapp();
   }}
 }}
 
