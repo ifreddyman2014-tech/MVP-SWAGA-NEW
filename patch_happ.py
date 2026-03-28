@@ -238,7 +238,7 @@ async def _get_happ_deeplink(sub_url: str) -> str:
                     import json as _json
                     try:
                         data = _json.loads(text)
-                        for key in ("link", "deep_link", "deeplink", "url", "result"):
+                        for key in ("encrypted_link", "link", "deep_link", "deeplink", "url", "result"):
                             if key in data and str(data[key]).startswith("happ://"):
                                 return str(data[key])
                     except Exception:
