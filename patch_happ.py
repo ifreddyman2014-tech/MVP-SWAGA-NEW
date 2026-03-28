@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Патч: добавляет вкладку Happ на страницу /connect/ в sub_app.py.
+Патч: добавляет вкладки Happ и Hiddify на страницу /connect/ в sub_app.py.
 Запуск: python3 patch_happ.py
 """
 import shutil
@@ -8,8 +8,6 @@ import sys
 from pathlib import Path
 
 SUB_APP = Path(__file__).parent / "sub_app.py"
-
-# ── Новый HTML с табами ────────────────────────────────────────────────────────
 
 NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
 <html lang="ru">
@@ -38,10 +36,12 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
   .btn-primary:active {{ background: #1a7f37; }}
   .btn-happ {{ background: #7c3aed; color: #fff; }}
   .btn-happ:active {{ background: #6d28d9; }}
+  .btn-hiddify {{ background: #0284c7; color: #fff; }}
+  .btn-hiddify:active {{ background: #0369a1; }}
   .btn-secondary {{ background: #21262d; color: #e6edf3; border: 1px solid #30363d; }}
   .btn-app {{ background: #21262d; color: #e6edf3; border: 1px solid #30363d;
               display: inline-block; width: auto; margin: 6px; padding: 12px 20px;
-              font-size: 14px; border-radius: 10px; }}
+              font-size: 14px; border-radius: 10px; text-decoration: none; }}
   .apps {{ margin-top: 16px; }}
   .hint {{ color: #8b949e; font-size: 13px; margin-top: 8px; }}
   .hidden {{ display: none; }}
@@ -50,7 +50,7 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
   /* Табы */
   .tabs {{ display: flex; max-width: 380px; margin: 20px auto 4px; border-radius: 12px;
            background: #161b22; border: 1px solid #30363d; overflow: hidden; }}
-  .tab {{ flex: 1; padding: 12px; font-size: 15px; font-weight: 600; cursor: pointer;
+  .tab {{ flex: 1; padding: 11px 6px; font-size: 14px; font-weight: 600; cursor: pointer;
           background: none; border: none; color: #8b949e; transition: all .2s; }}
   .tab.active {{ background: #21262d; color: #e6edf3; }}
   .tab-content {{ display: none; }}
@@ -66,11 +66,12 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
 <div class="tabs">
   <button class="tab active" onclick="switchTab('v2raytun', this)">V2RayTun</button>
   <button class="tab" onclick="switchTab('happ', this)">Happ</button>
+  <button class="tab" onclick="switchTab('hiddify', this)">Hiddify</button>
 </div>
 
 <!-- V2RayTun -->
 <div id="tab-v2raytun" class="tab-content active">
-  <a class="btn btn-primary" id="openAppBtn" href="{deeplink}">
+  <a class="btn btn-primary" href="{deeplink}">
     &#x1F680; Добавить подписку в V2RayTun
   </a>
   <p class="hint">Нажмите, чтобы автоматически добавить VPN</p>
@@ -108,7 +109,7 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
 
   <p class="or">— или —</p>
 
-  <button class="btn btn-secondary" onclick="copySubUrl()">
+  <button class="btn btn-secondary" onclick="copySubUrl('copyHintHapp')">
     &#x1F4CB; Скопировать ссылку подписки
   </button>
   <p class="hint" id="copyHintHapp"></p>
@@ -130,6 +131,37 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Hiddify -->
+<div id="tab-hiddify" class="tab-content">
+  <a class="btn btn-hiddify" href="{hiddify_deeplink}">
+    &#x1F535; Добавить подписку в Hiddify
+  </a>
+  <p class="hint">Нажмите, чтобы автоматически добавить VPN в Hiddify</p>
+
+  <p class="or">— или —</p>
+
+  <button class="btn btn-secondary" onclick="copySubUrl('copyHintHiddify')">
+    &#x1F4CB; Скопировать ссылку подписки
+  </button>
+  <p class="hint" id="copyHintHiddify"></p>
+
+  <div class="step">
+    <p style="color:#8b949e; font-size:14px; margin:0 0 10px;">Если автоматически не открылось:</p>
+    <div class="step-row"><span class="step-num">1</span>
+      <span class="step-text">Нажмите <b>«Скопировать ссылку»</b></span></div>
+    <div class="step-row"><span class="step-num">2</span>
+      <span class="step-text">Откройте <b>Hiddify</b> → Новый профиль</span></div>
+    <div class="step-row"><span class="step-num">3</span>
+      <span class="step-text">Вставьте ссылку и нажмите <b>«Добавить»</b></span></div>
+  </div>
+
+  <div class="apps">
+    <p style="color:#8b949e; font-size:14px; margin-bottom:4px;">Нет приложения? Скачайте:</p>
+    <a class="btn btn-app" href="https://apps.apple.com/app/hiddify/id6596777532">iOS</a>
+    <a class="btn btn-app" href="https://play.google.com/store/apps/details?id=app.hiddify.com">Android</a>
+  </div>
+</div>
+
 <input type="text" id="configData" value="{vless_link}" class="hidden">
 <input type="text" id="subUrlData" value="{sub_url}" class="hidden">
 
@@ -148,18 +180,18 @@ function copyConfig() {{
   copyText(config, btn, hint, 'Откройте V2RayTun — он предложит импорт');
 }}
 
-function copySubUrl() {{
+function copySubUrl(hintId) {{
   var url = document.getElementById('subUrlData').value;
-  var btn = event.target;
-  var hint = document.getElementById('copyHintHapp');
-  copyText(url, btn, hint, 'Вставьте в Happ → Подписки → +');
+  var btn = event.currentTarget;
+  var hint = document.getElementById(hintId);
+  copyText(url, btn, hint, 'Вставьте ссылку в приложение');
 }}
 
 function copyText(text, btn, hint, successHint) {{
   if (navigator.clipboard && navigator.clipboard.writeText) {{
     navigator.clipboard.writeText(text).then(function() {{
       btn.innerHTML = '&#x2705; Скопировано!';
-      hint.textContent = successHint;
+      if (hint) hint.textContent = successHint;
     }}).catch(function() {{ fallback(text, btn, hint, successHint); }});
   }} else {{
     fallback(text, btn, hint, successHint);
@@ -174,9 +206,9 @@ function fallback(text, btn, hint, successHint) {{
   try {{
     document.execCommand('copy');
     btn.innerHTML = '&#x2705; Скопировано!';
-    hint.textContent = successHint;
+    if (hint) hint.textContent = successHint;
   }} catch(e) {{
-    hint.textContent = 'Скопируйте вручную';
+    if (hint) hint.textContent = 'Скопируйте вручную';
   }}
   document.body.removeChild(inp);
 }}
@@ -185,18 +217,15 @@ function fallback(text, btn, hint, successHint) {{
 </body>
 </html>"""'''
 
-# ── Новая строка deeplink (добавляем happ_deeplink) ────────────────────────────
-
 OLD_DEEPLINK = '    deeplink = f"v2raytun://import/{sub_url}"'
 NEW_DEEPLINK = (
     '    deeplink = f"v2raytun://import/{sub_url}"\n'
-    '    happ_deeplink = f"happ://install-sub?url={sub_url}"'
+    '    happ_deeplink = f"happ://install-sub?url={sub_url}"\n'
+    '    hiddify_deeplink = f"hiddify://install-sub/?url={sub_url}"'
 )
 
 OLD_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink)'
-NEW_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink, happ_deeplink=happ_deeplink)'
-
-# ── Старый HTML (маркеры начала и конца) ──────────────────────────────────────
+NEW_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink, happ_deeplink=happ_deeplink, hiddify_deeplink=hiddify_deeplink)'
 
 OLD_HTML_START = 'CONNECT_HTML = """<!DOCTYPE html>'
 OLD_HTML_END = '</html>"""'
@@ -209,32 +238,28 @@ def main():
 
     source = SUB_APP.read_text(encoding="utf-8")
 
-    if 'tab-happ' in source:
-        print("ℹ️  Вкладка Happ уже присутствует — патч не нужен.")
+    if 'tab-hiddify' in source:
+        print("ℹ️  Вкладки уже присутствуют — патч не нужен.")
         sys.exit(0)
 
     if OLD_HTML_START not in source:
         print("❌ Не найден маркер CONNECT_HTML в sub_app.py")
         sys.exit(1)
 
-    # Бэкап
     backup = SUB_APP.with_suffix(".py.bak")
     shutil.copy2(SUB_APP, backup)
     print(f"✅ Бэкап сохранён: {backup}")
 
-    # Заменяем HTML блок целиком
     start = source.index(OLD_HTML_START)
     end = source.index(OLD_HTML_END, start) + len(OLD_HTML_END)
     source = source[:start] + NEW_HTML + source[end:]
 
-    # Добавляем happ_deeplink переменную
     if OLD_DEEPLINK in source:
         source = source.replace(OLD_DEEPLINK, NEW_DEEPLINK, 1)
-        print("✅ Добавлена переменная happ_deeplink")
+        print("✅ Добавлены переменные happ_deeplink и hiddify_deeplink")
     else:
         print("⚠️  Строка deeplink не найдена — проверьте вручную")
 
-    # Обновляем format() вызов
     if OLD_FORMAT in source:
         source = source.replace(OLD_FORMAT, NEW_FORMAT, 1)
         print("✅ Обновлён вызов CONNECT_HTML.format()")
@@ -242,7 +267,7 @@ def main():
         print("⚠️  Строка format() не найдена — проверьте вручную")
 
     SUB_APP.write_text(source, encoding="utf-8")
-    print("✅ Патч применён: вкладка Happ добавлена на страницу /connect/")
+    print("✅ Патч применён: вкладки Happ и Hiddify добавлены на страницу /connect/")
     print("👉 Перезапустите сервис: systemctl restart vpnbot")
 
 
