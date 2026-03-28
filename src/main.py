@@ -347,6 +347,7 @@ async def setup_bot_commands(bot: Bot):
         BotCommand(command="user_info", description="Инфо о пользователе [user_id]"),
         BotCommand(command="servers", description="Статус серверов"),
         BotCommand(command="broadcast", description="Рассылка [текст]"),
+        BotCommand(command="keygen", description="Создать гивевей-ключ [7/30/90/365]"),
     ]
     for admin_id in settings.admin_id_list:
         try:

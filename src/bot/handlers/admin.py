@@ -9,6 +9,7 @@ Commands:
     /user_info USER_ID          — Show user info and subscription status
     /servers                    — List all servers with status
     /broadcast TEXT             — Send a message to all active subscribers
+    /keygen DAYS                — Create giveaway key (7/30/90/365) and return subscription link
 """
 
 import logging
@@ -20,6 +21,9 @@ from aiogram.filters import Command
 from aiogram.types import Message
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+GIVEAWAY_ID_BASE = 9_000_000_000
+KEYGEN_ALLOWED_DAYS = {7, 30, 90, 365}
 
 from ...config import settings
 from ...database.models import Key, Server, Subscription, User
@@ -387,6 +391,88 @@ async def cmd_broadcast(message: Message, session: AsyncSession):
         f"✔️ Отправлено: {sent}\n"
         f"❌ Ошибок: {failed}"
     )
+
+
+# ============== /keygen ==============
+
+@router.message(Command("keygen"))
+async def cmd_keygen(message: Message, session: AsyncSession):
+    """
+    /keygen DAYS
+
+    Create a giveaway account with a subscription for DAYS days (7/30/90/365).
+    Returns a ready-to-use subscription link — no real Telegram user needed.
+    """
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer(
+            "⚠️ Использование: <code>/keygen DAYS</code>\n"
+            "Допустимые значения: <b>7, 30, 90, 365</b>\n"
+            "Пример: <code>/keygen 30</code>"
+        )
+        return
+
+    days = int(parts[1])
+    if days not in KEYGEN_ALLOWED_DAYS:
+        await message.answer(
+            f"❌ Недопустимое количество дней: <b>{days}</b>\n"
+            "Разрешено: <b>7, 30, 90, 365</b>"
+        )
+        return
+
+    # Find next giveaway user_id
+    result = await session.execute(
+        select(func.max(User.telegram_id)).where(User.telegram_id >= GIVEAWAY_ID_BASE)
+    )
+    last_id = result.scalar() or (GIVEAWAY_ID_BASE - 1)
+    giveaway_tg_id = last_id + 1
+
+    # Create giveaway user
+    user = User(
+        telegram_id=giveaway_tg_id,
+        username=f"giveaway_{giveaway_tg_id}",
+        trial_used=True,
+    )
+    session.add(user)
+    await session.commit()
+    await session.refresh(user)
+
+    # Create subscription
+    expiry = datetime.utcnow() + timedelta(days=days)
+    sub = Subscription(
+        user_id=user.id,
+        is_active=True,
+        expiry_date=expiry,
+        plan_type=f"giveaway_{days}d",
+    )
+    session.add(sub)
+    await session.commit()
+    await session.refresh(sub)
+
+    # Generate keys on all servers
+    await message.answer("⏳ Создаю ключи на серверах...")
+    try:
+        await generate_keys_for_subscription(user, sub, expiry, session)
+    except Exception as e:
+        logger.error(f"keygen: failed to generate keys: {e}")
+        await message.answer(f"❌ Ошибка генерации ключей: {e}")
+        return
+
+    sub_url = f"{settings.webhook_base_url}/sub/{sub.sub_token}"
+    connect_url = f"{settings.webhook_base_url}/connect/{sub.sub_token}"
+
+    await message.answer(
+        f"✅ <b>Гивевей-ключ создан</b>\n\n"
+        f"⏱ Дней: <b>{days}</b>\n"
+        f"📅 Действует до: <b>{expiry.strftime('%d.%m.%Y')}</b>\n\n"
+        f"🔗 <b>Быстрое подключение:</b>\n{connect_url}\n\n"
+        f"📋 <b>Ссылка на подписку:</b>\n<code>{sub_url}</code>",
+        disable_web_page_preview=True,
+    )
+    logger.info(f"Admin {message.from_user.id} created giveaway key for {days} days, tg_id={giveaway_tg_id}")
 
 
 # ============== Helper: update keys expiry on all panels ==============
