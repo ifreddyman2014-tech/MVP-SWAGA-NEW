@@ -46,8 +46,6 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
   .hint {{ color: #8b949e; font-size: 13px; margin-top: 8px; }}
   .hidden {{ display: none; }}
   .or {{ color: #8b949e; font-size: 14px; margin: 10px 0; }}
-
-  /* Табы */
   .tabs {{ display: flex; max-width: 380px; margin: 20px auto 4px; border-radius: 12px;
            background: #161b22; border: 1px solid #30363d; overflow: hidden; }}
   .tab {{ flex: 1; padding: 11px 6px; font-size: 14px; font-weight: 600; cursor: pointer;
@@ -69,7 +67,7 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
   <button class="tab" onclick="switchTab('hiddify', this)">Hiddify</button>
 </div>
 
-<!-- V2RayTun -->
+<!-- ── V2RayTun ── -->
 <div id="tab-v2raytun" class="tab-content active">
   <a class="btn btn-primary" href="{deeplink}">
     &#x1F680; Добавить подписку в V2RayTun
@@ -100,28 +98,21 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Happ -->
+<!-- ── Happ ── -->
 <div id="tab-happ" class="tab-content">
-  <a class="btn btn-happ" href="{happ_deeplink}">
-    &#x1F7E3; Добавить подписку в Happ
-  </a>
-  <p class="hint">Нажмите, чтобы автоматически добавить VPN в Happ</p>
-
-  <p class="or">— или —</p>
-
-  <button class="btn btn-secondary" onclick="copySubUrl('copyHintHapp')">
+  <button class="btn btn-happ" onclick="copySubUrl('copyHintHapp', this)">
     &#x1F4CB; Скопировать ссылку подписки
   </button>
-  <p class="hint" id="copyHintHapp"></p>
+  <p class="hint" id="copyHintHapp">Нажмите — ссылка скопируется в буфер</p>
 
   <div class="step">
-    <p style="color:#8b949e; font-size:14px; margin:0 0 10px;">Если автоматически не открылось:</p>
+    <p style="color:#8b949e; font-size:14px; margin:0 0 10px;">Как добавить в Happ:</p>
     <div class="step-row"><span class="step-num">1</span>
-      <span class="step-text">Нажмите <b>«Скопировать ссылку»</b></span></div>
+      <span class="step-text">Нажмите кнопку выше — ссылка скопируется</span></div>
     <div class="step-row"><span class="step-num">2</span>
-      <span class="step-text">Откройте <b>Happ</b> → Подписки</span></div>
+      <span class="step-text">Откройте <b>Happ</b> → раздел <b>Подписки</b></span></div>
     <div class="step-row"><span class="step-num">3</span>
-      <span class="step-text">Нажмите <b>«+»</b> и вставьте ссылку</span></div>
+      <span class="step-text">Нажмите <b>«+»</b>, вставьте ссылку, сохраните</span></div>
   </div>
 
   <div class="apps">
@@ -131,7 +122,7 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
-<!-- Hiddify -->
+<!-- ── Hiddify ── -->
 <div id="tab-hiddify" class="tab-content">
   <a class="btn btn-hiddify" href="{hiddify_deeplink}">
     &#x1F535; Добавить подписку в Hiddify
@@ -140,7 +131,7 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
 
   <p class="or">— или —</p>
 
-  <button class="btn btn-secondary" onclick="copySubUrl('copyHintHiddify')">
+  <button class="btn btn-secondary" onclick="copySubUrl('copyHintHiddify', this)">
     &#x1F4CB; Скопировать ссылку подписки
   </button>
   <p class="hint" id="copyHintHiddify"></p>
@@ -150,7 +141,7 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
     <div class="step-row"><span class="step-num">1</span>
       <span class="step-text">Нажмите <b>«Скопировать ссылку»</b></span></div>
     <div class="step-row"><span class="step-num">2</span>
-      <span class="step-text">Откройте <b>Hiddify</b> → Новый профиль</span></div>
+      <span class="step-text">Откройте <b>Hiddify</b> → <b>Новый профиль</b></span></div>
     <div class="step-row"><span class="step-num">3</span>
       <span class="step-text">Вставьте ссылку и нажмите <b>«Добавить»</b></span></div>
   </div>
@@ -180,9 +171,8 @@ function copyConfig() {{
   copyText(config, btn, hint, 'Откройте V2RayTun — он предложит импорт');
 }}
 
-function copySubUrl(hintId) {{
+function copySubUrl(hintId, btn) {{
   var url = document.getElementById('subUrlData').value;
-  var btn = event.currentTarget;
   var hint = document.getElementById(hintId);
   copyText(url, btn, hint, 'Вставьте ссылку в приложение');
 }}
@@ -220,12 +210,11 @@ function fallback(text, btn, hint, successHint) {{
 OLD_DEEPLINK = '    deeplink = f"v2raytun://import/{sub_url}"'
 NEW_DEEPLINK = (
     '    deeplink = f"v2raytun://import/{sub_url}"\n'
-    '    happ_deeplink = f"happ://install-sub?url={sub_url}"\n'
     '    hiddify_deeplink = f"hiddify://install-sub/?url={sub_url}"'
 )
 
 OLD_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink)'
-NEW_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink, happ_deeplink=happ_deeplink, hiddify_deeplink=hiddify_deeplink)'
+NEW_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink, hiddify_deeplink=hiddify_deeplink)'
 
 OLD_HTML_START = 'CONNECT_HTML = """<!DOCTYPE html>'
 OLD_HTML_END = '</html>"""'
@@ -256,7 +245,7 @@ def main():
 
     if OLD_DEEPLINK in source:
         source = source.replace(OLD_DEEPLINK, NEW_DEEPLINK, 1)
-        print("✅ Добавлены переменные happ_deeplink и hiddify_deeplink")
+        print("✅ Добавлена переменная hiddify_deeplink")
     else:
         print("⚠️  Строка deeplink не найдена — проверьте вручную")
 
