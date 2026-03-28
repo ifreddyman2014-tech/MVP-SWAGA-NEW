@@ -107,7 +107,7 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
   <button class="btn btn-happ" onclick="copyConfigAndOpenHapp(this)">
     &#x1F4CB; Скопировать конфиг для Happ
   </button>
-  <p class="hint" id="happHint">Нажмите — конфиг скопируется в буфер обмена</p>
+  <p class="hint" id="happHint">Нажмите → откройте Happ → нажмите «+» → «Вставить из буфера»</p>
 
   <div class="step">
     <p style="color:#8b949e; font-size:14px; margin:0 0 10px;">Как подключить:</p>
