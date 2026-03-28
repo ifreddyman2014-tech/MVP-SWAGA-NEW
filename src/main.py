@@ -17,6 +17,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.responses import Response, HTMLResponse
 from sqlalchemy import select
@@ -46,6 +47,19 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+
+# ============== Aiogram DB Middleware ==============
+
+class DbSessionMiddleware(BaseMiddleware):
+    """Inject AsyncSession into every aiogram handler as 'session'."""
+
+    async def __call__(self, handler, event, data):
+        from .database import get_session
+        async for session in get_session():
+            data["session"] = session
+            return await handler(event, data)
+
+
 # Global bot instance
 bot: Bot = None
 dp: Dispatcher = None
@@ -68,6 +82,7 @@ async def lifespan(app: FastAPI):
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
     dp = Dispatcher()
+    dp.update.middleware(DbSessionMiddleware())
     dp.include_router(admin_router)
     dp.include_router(user_router)
 
