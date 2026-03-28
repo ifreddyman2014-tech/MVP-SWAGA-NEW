@@ -26,7 +26,12 @@ urllib3.disable_warnings()
 
 DB_PATH       = os.getenv("DATABASE_PATH", "./vpn_bot.db")
 SERVERS_JSON  = os.getenv("SERVERS_JSON",  "./servers.json")
-SUB_BASE_URL  = os.getenv("SUB_BASE_URL",  "")   # например: https://sub.swaga-vpn.ru/sub/
+
+_sub_base = os.getenv("SUB_BASE_URL", "")
+if not _sub_base:
+    _webhook = os.getenv("WEBHOOK_BASE_URL", "").rstrip("/")
+    _sub_base = f"{_webhook}/sub/" if _webhook else ""
+SUB_BASE_URL = _sub_base
 
 GIVEAWAY_PLANS = [
     ("7d",  7,  3),
