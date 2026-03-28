@@ -114,9 +114,9 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
     <div class="step-row"><span class="step-num">1</span>
       <span class="step-text">Нажмите кнопку выше — конфиг скопируется</span></div>
     <div class="step-row"><span class="step-num">2</span>
-      <span class="step-text">Откройте <b>Happ</b></span></div>
+      <span class="step-text">Откройте <b>Happ</b> → нажмите <b>«+»</b></span></div>
     <div class="step-row"><span class="step-num">3</span>
-      <span class="step-text">Приложение предложит <b>импортировать</b> из буфера</span></div>
+      <span class="step-text">Выберите <b>«Вставить из буфера»</b> или <b>«Из буфера обмена»</b></span></div>
   </div>
 
   <div class="apps">
