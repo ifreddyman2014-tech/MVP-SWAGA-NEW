@@ -104,24 +104,19 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
 
 <!-- ── Happ ── -->
 <div id="tab-happ" class="tab-content">
-  {happ_btn}
-  <p class="hint">Нажмите, чтобы автоматически открыть Happ</p>
-
-  <p class="or">— или —</p>
-
-  <button class="btn btn-secondary" onclick="copySubUrl('copyHintHapp', this)">
-    &#x1F4CB; Скопировать ссылку подписки
+  <button class="btn btn-happ" onclick="copyConfigAndOpenHapp(this)">
+    &#x1F7E3; Скопировать и открыть Happ
   </button>
-  <p class="hint" id="copyHintHapp"></p>
+  <p class="hint" id="happHint">Нажмите — конфиг скопируется и Happ откроется сам</p>
 
   <div class="step">
-    <p style="color:#8b949e; font-size:14px; margin:0 0 10px;">Если автоматически не открылось:</p>
+    <p style="color:#8b949e; font-size:14px; margin:0 0 10px;">Как это работает:</p>
     <div class="step-row"><span class="step-num">1</span>
-      <span class="step-text">Нажмите <b>«Скопировать ссылку»</b></span></div>
+      <span class="step-text">Нажмите кнопку выше — конфиг скопируется</span></div>
     <div class="step-row"><span class="step-num">2</span>
-      <span class="step-text">Откройте <b>Happ</b> → раздел <b>Подписки</b></span></div>
+      <span class="step-text">Happ откроется автоматически</span></div>
     <div class="step-row"><span class="step-num">3</span>
-      <span class="step-text">Нажмите <b>«+»</b>, вставьте ссылку, сохраните</span></div>
+      <span class="step-text">Приложение предложит <b>импортировать</b> из буфера</span></div>
   </div>
 
   <div class="apps">
@@ -184,6 +179,31 @@ function copySubUrl(hintId, btn) {{
   var url = document.getElementById('subUrlData').value;
   var hint = document.getElementById(hintId);
   copyText(url, btn, hint, 'Вставьте ссылку в приложение');
+}}
+
+function copyConfigAndOpenHapp(btn) {{
+  var config = document.getElementById('configData').value;
+  var hint = document.getElementById('happHint');
+  function openHapp() {{
+    btn.innerHTML = '&#x2705; Скопировано — открываю Happ...';
+    hint.textContent = 'Если Happ не открылся — откройте вручную';
+    setTimeout(function() {{ window.location.href = 'happ://'; }}, 300);
+  }}
+  if (navigator.clipboard && navigator.clipboard.writeText) {{
+    navigator.clipboard.writeText(config).then(openHapp).catch(function() {{
+      var inp = document.createElement('textarea');
+      inp.value = config; document.body.appendChild(inp); inp.select();
+      try {{ document.execCommand('copy'); }} catch(e) {{}}
+      document.body.removeChild(inp);
+      openHapp();
+    }});
+  }} else {{
+    var inp = document.createElement('textarea');
+    inp.value = config; document.body.appendChild(inp); inp.select();
+    try {{ document.execCommand('copy'); }} catch(e) {{}}
+    document.body.removeChild(inp);
+    openHapp();
+  }}
 }}
 
 function copyText(text, btn, hint, successHint) {{
@@ -254,17 +274,11 @@ async def _get_happ_deeplink(sub_url: str) -> str:
 OLD_DEEPLINK = '    deeplink = f"v2raytun://import/{sub_url}"'
 NEW_DEEPLINK = (
     '    deeplink = f"v2raytun://import/{sub_url}"\n'
-    '    hiddify_deeplink = f"hiddify://install-sub/?url={sub_url}"\n'
-    '    happ_crypto = await _get_happ_deeplink(sub_url)\n'
-    '    happ_btn = (\n'
-    '        f\'<a class="btn btn-happ" href="{happ_crypto}">&#x1F7E3; Открыть в Happ</a>\'\n'
-    '        if happ_crypto else\n'
-    '        \'<button class="btn btn-happ" onclick="copySubUrl(\\\'copyHintHapp\\\', this)">&#x1F4CB; Скопировать ссылку для Happ</button>\'\n'
-    '    )'
+    '    hiddify_deeplink = f"hiddify://install-sub/?url={sub_url}"'
 )
 
 OLD_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink)'
-NEW_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink, hiddify_deeplink=hiddify_deeplink, happ_btn=happ_btn)'
+NEW_FORMAT = 'html = CONNECT_HTML.format(vless_link=first_vless_link, sub_url=sub_url, deeplink=deeplink, hiddify_deeplink=hiddify_deeplink)'
 
 OLD_HTML_START = 'CONNECT_HTML = """<!DOCTYPE html>'
 OLD_HTML_END = '</html>"""'
@@ -298,14 +312,7 @@ def main():
     source = source[:start] + NEW_HTML + source[end:]
     print("✅ HTML шаблон заменён")
 
-    # 2. Добавляем helper-функцию перед handle_connect
-    if HANDLE_CONNECT_MARKER in source:
-        source = source.replace(HANDLE_CONNECT_MARKER, HAPP_HELPER + HANDLE_CONNECT_MARKER, 1)
-        print("✅ Добавлена функция _get_happ_deeplink()")
-    else:
-        print(f"⚠️  Маркер '{HANDLE_CONNECT_MARKER}' не найден — добавьте _get_happ_deeplink() вручную")
-
-    # 3. Обновляем строки в handle_connect
+    # 2. Обновляем строки в handle_connect
     if OLD_DEEPLINK in source:
         source = source.replace(OLD_DEEPLINK, NEW_DEEPLINK, 1)
         print("✅ Добавлены hiddify_deeplink и happ_btn")
