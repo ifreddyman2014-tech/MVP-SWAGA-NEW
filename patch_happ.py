@@ -121,8 +121,8 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
 
   <div class="apps">
     <p style="color:#8b949e; font-size:14px; margin-bottom:4px;">Нет приложения? Скачайте:</p>
-    <a class="btn btn-app" href="https://apps.apple.com/app/happ-proxy-utility/id6504287480">iOS</a>
-    <a class="btn btn-app" href="https://play.google.com/store/apps/details?id=com.happproxy.app">Android</a>
+    <a class="btn btn-app" href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a>
+    <a class="btn btn-app" href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a>
   </div>
 </div>
 
@@ -152,8 +152,37 @@ NEW_HTML = '''CONNECT_HTML = """<!DOCTYPE html>
 
   <div class="apps">
     <p style="color:#8b949e; font-size:14px; margin-bottom:4px;">Нет приложения? Скачайте:</p>
-    <a class="btn btn-app" href="https://apps.apple.com/app/hiddify/id6596777532">iOS</a>
+    <a class="btn btn-app" href="https://apps.apple.com/app/hiddify-proxy-vpn/id6596777532">iOS</a>
     <a class="btn btn-app" href="https://play.google.com/store/apps/details?id=app.hiddify.com">Android</a>
+  </div>
+</div>
+
+<!-- ── Скачать приложения ── -->
+<div style="max-width:380px; margin:24px auto 0; border-top:1px solid #30363d; padding-top:20px;">
+  <p style="color:#8b949e; font-size:13px; margin-bottom:12px;">📲 Скачать приложения:</p>
+
+  <div style="display:flex; align-items:center; justify-content:space-between; background:#161b22; border:1px solid #30363d; border-radius:10px; padding:10px 14px; margin-bottom:8px;">
+    <span style="font-size:14px; font-weight:600;">V2RayTun</span>
+    <div>
+      <a class="btn btn-app" style="margin:0 4px; padding:6px 14px; font-size:13px;" href="https://apps.apple.com/app/v2raytun/id6476628951">iOS</a>
+      <a class="btn btn-app" style="margin:0 4px; padding:6px 14px; font-size:13px;" href="https://play.google.com/store/apps/details?id=com.v2raytun.android">Android</a>
+    </div>
+  </div>
+
+  <div style="display:flex; align-items:center; justify-content:space-between; background:#161b22; border:1px solid #30363d; border-radius:10px; padding:10px 14px; margin-bottom:8px;">
+    <span style="font-size:14px; font-weight:600;">Happ</span>
+    <div>
+      <a class="btn btn-app" style="margin:0 4px; padding:6px 14px; font-size:13px;" href="https://apps.apple.com/app/happ-proxy-utility/id6504287215">iOS</a>
+      <a class="btn btn-app" style="margin:0 4px; padding:6px 14px; font-size:13px;" href="https://play.google.com/store/apps/details?id=com.happproxy">Android</a>
+    </div>
+  </div>
+
+  <div style="display:flex; align-items:center; justify-content:space-between; background:#161b22; border:1px solid #30363d; border-radius:10px; padding:10px 14px; margin-bottom:8px;">
+    <span style="font-size:14px; font-weight:600;">Hiddify</span>
+    <div>
+      <a class="btn btn-app" style="margin:0 4px; padding:6px 14px; font-size:13px;" href="https://apps.apple.com/app/hiddify-proxy-vpn/id6596777532">iOS</a>
+      <a class="btn btn-app" style="margin:0 4px; padding:6px 14px; font-size:13px;" href="https://play.google.com/store/apps/details?id=app.hiddify.com">Android</a>
+    </div>
   </div>
 </div>
 
