@@ -224,9 +224,10 @@ async def cb_partnership(call: types.CallbackQuery):
 async def cb_contact_support(call: types.CallbackQuery):
     await SupportState.waiting_message.set()
     await call.message.edit_text(
-        "💬 <b>Техподдержка</b>\n\n"
-        "Напиши своё сообщение — мы ответим в ближайшее время.\n"
-        "Можешь прикрепить скриншот.",
+        "💬 <b>Диалог с поддержкой открыт</b>\n\n"
+        "Пиши сообщения — можно несколько подряд.\n"
+        "Прикрепляй скриншоты если нужно.\n\n"
+        "Нажми <b>◀️ Назад</b> чтобы закрыть диалог.",
         reply_markup=back_btn(),
     )
     await call.answer()
@@ -236,52 +237,114 @@ async def cb_contact_support(call: types.CallbackQuery):
 async def handle_support_message(message: types.Message, state: FSMContext):
     user = message.from_user
     username = f"@{user.username}" if user.username else f"id{user.id}"
+    tag = f"📩 <b>Обращение</b> | 👤 {user.full_name} ({username}) | 🆔 <code>{user.id}</code>"
 
     if ADMIN_CHAT_ID:
         try:
-            header = (
-                f"📩 <b>Новое обращение в поддержку</b>\n"
-                f"👤 {user.full_name} ({username})\n"
-                f"🆔 <code>{user.id}</code>\n"
-                f"{'─' * 30}"
-            )
-            await bot.send_message(ADMIN_CHAT_ID, header)
-            await message.forward(ADMIN_CHAT_ID)
+            if message.text:
+                await bot.send_message(
+                    ADMIN_CHAT_ID,
+                    f"{tag}\n{'─' * 28}\n{message.text}",
+                )
+            elif message.photo:
+                await bot.send_photo(
+                    ADMIN_CHAT_ID,
+                    message.photo[-1].file_id,
+                    caption=f"{tag}\n{message.caption or ''}",
+                    parse_mode="HTML",
+                )
+            elif message.video:
+                await bot.send_video(
+                    ADMIN_CHAT_ID,
+                    message.video.file_id,
+                    caption=f"{tag}\n{message.caption or ''}",
+                    parse_mode="HTML",
+                )
+            elif message.document:
+                await bot.send_document(
+                    ADMIN_CHAT_ID,
+                    message.document.file_id,
+                    caption=f"{tag}\n{message.caption or ''}",
+                    parse_mode="HTML",
+                )
+            elif message.voice:
+                await bot.send_message(ADMIN_CHAT_ID, f"{tag}\n[голосовое]")
+                await message.forward(ADMIN_CHAT_ID)
+            else:
+                await bot.send_message(ADMIN_CHAT_ID, tag)
+                await message.forward(ADMIN_CHAT_ID)
         except Exception as e:
             logger.error(f"Не удалось переслать сообщение админу: {e}")
 
-    await state.finish()
+    # Оставляем пользователя в диалоге — можно писать ещё
     await message.answer(
-        "✅ <b>Сообщение отправлено!</b>\n\n"
-        "Мы ответим тебе здесь в ближайшее время.\n"
-        "Среднее время ответа: <b>до 24 часов</b>.",
+        "✅ Отправлено. Можешь написать ещё или нажми ◀️ Назад.",
         reply_markup=back_btn(),
     )
 
 
 # ── Ответ от админа пользователю ─────────────────────────────────────────────
 
+import re as _re
+
+def _extract_user_id(msg: types.Message) -> int | None:
+    """Извлекает user_id из сообщения с тегом 🆔 (text или caption)."""
+    text = msg.text or msg.caption or ""
+    m = _re.search(r"🆔\s*(?:<[^>]+>)?(\d+)", text)
+    if m:
+        return int(m.group(1))
+    return None
+
+
 @dp.message_handler(lambda m: m.chat.id == ADMIN_CHAT_ID and m.reply_to_message)
 async def admin_reply(message: types.Message):
     replied = message.reply_to_message
-    if not replied or not replied.text:
+    if not replied:
         return
 
-    for line in replied.text.splitlines():
-        if "🆔" in line:
-            uid_str = line.replace("🆔", "").strip()
-            try:
-                target_id = int(uid_str)
-                await bot.send_message(
-                    target_id,
-                    f"💬 <b>Ответ от поддержки:</b>\n\n{message.text}",
-                )
-                await message.reply("✅ Ответ отправлен пользователю.")
-                return
-            except Exception as e:
-                logger.error(f"Не удалось отправить ответ: {e}")
+    target_id = _extract_user_id(replied)
+    if not target_id:
+        return  # Это реплай не на сообщение поддержки — молча игнорируем
 
-    await message.reply("⚠️ Не удалось определить пользователя.")
+    try:
+        prefix = "💬 <b>Ответ от поддержки:</b>\n\n"
+        if message.text:
+            await bot.send_message(target_id, f"{prefix}{message.text}")
+        elif message.photo:
+            await bot.send_photo(
+                target_id,
+                message.photo[-1].file_id,
+                caption=f"{prefix}{message.caption or ''}",
+                parse_mode="HTML",
+            )
+        elif message.video:
+            await bot.send_video(
+                target_id,
+                message.video.file_id,
+                caption=f"{prefix}{message.caption or ''}",
+                parse_mode="HTML",
+            )
+        elif message.document:
+            await bot.send_document(
+                target_id,
+                message.document.file_id,
+                caption=f"{prefix}{message.caption or ''}",
+                parse_mode="HTML",
+            )
+        elif message.voice:
+            await bot.send_message(target_id, prefix)
+            await bot.forward_message(target_id, message.chat.id, message.message_id)
+        elif message.sticker:
+            await bot.send_message(target_id, prefix)
+            await bot.send_sticker(target_id, message.sticker.file_id)
+        else:
+            await bot.send_message(target_id, prefix)
+            await bot.forward_message(target_id, message.chat.id, message.message_id)
+
+        await message.reply("✅ Отправлено пользователю.")
+    except Exception as e:
+        logger.error(f"Не удалось отправить ответ пользователю {target_id}: {e}")
+        await message.reply(f"❌ Ошибка: {e}")
 
 
 # ── Запуск ────────────────────────────────────────────────────────────────────

@@ -1,0 +1,254 @@
+"""
+Клиент для работы с 3X-UI Panel API (Xray/VLESS).
+Использует requests.Session для сохранения cookie-сессии.
+"""
+
+import json
+import logging
+import urllib3
+
+import requests
+
+from config import XUI_HOST, XUI_PORT, XUI_WEB_PATH, XUI_USER, XUI_PASS
+
+# Отключаем предупреждения о самоподписанных сертификатах
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+logger = logging.getLogger(__name__)
+
+# Подстроки в msg ответа, означающие «клиент с таким UUID не найден».
+# Используются в add_or_update_client для fallback на addClient.
+_NOT_FOUND_MARKERS = ("record not found", "not found", "no client")
+
+
+def _parse_api_response(resp: requests.Response) -> dict:
+    """
+    Безопасно парсит JSON-ответ панели.
+    Если тело — HTML или пустое, возвращает dict с диагностикой,
+    не раскрывая содержимое ответа (там могут быть CSRF-токены).
+    """
+    ct = resp.headers.get("Content-Type", "")
+    if "json" not in ct:
+        logger.error(
+            "3X-UI: ожидался JSON, получен %s (HTTP %s, Content-Type: %s)",
+            "HTML" if "html" in ct else "не-JSON",
+            resp.status_code,
+            ct,
+        )
+        return {"success": False, "msg": f"non-json response: HTTP {resp.status_code}"}
+    try:
+        return resp.json()
+    except ValueError as exc:
+        logger.error("3X-UI: не удалось распарсить JSON (HTTP %s): %s", resp.status_code, exc)
+        return {"success": False, "msg": f"json parse error: HTTP {resp.status_code}"}
+
+
+class XUIAPI:
+    """Обёртка над REST API панели 3X-UI."""
+
+    def __init__(self) -> None:
+        self.session = requests.Session()
+        # Используем HTTPS для порта 443, HTTP для остальных
+        protocol = "https" if XUI_PORT == "443" else "http"
+        self.base_url = f"{protocol}://{XUI_HOST}:{XUI_PORT}{XUI_WEB_PATH}"
+        self._logged_in = False
+
+    # ── Аутентификация ────────────────────────────────────────────────────────
+
+    def _url(self, path: str) -> str:
+        """Строит URL без двойных слешей (защита от trailing slash в base_url)."""
+        return self.base_url.rstrip("/") + "/" + path.lstrip("/")
+
+    def login(self, username: str = None, password: str = None) -> bool:
+        """Авторизация в панели. Возвращает True при успехе."""
+        import re as _re
+        url = self._url("login")
+        user = username or XUI_USER
+        pwd = password or XUI_PASS
+        try:
+            # Получаем CSRF-токен (нужен в 3X-UI v3+)
+            try:
+                page = self.session.get(self.base_url.rstrip("/") + "/", verify=False, timeout=8)
+                m = _re.search(r'csrf-token" content="([^"]+)"', page.text)
+                if m:
+                    # Сохраняем в сессии — будет отправляться со всеми последующими запросами
+                    self.session.headers.update({"X-Csrf-Token": m.group(1)})
+            except Exception:
+                pass
+
+            resp = self.session.post(
+                url,
+                data={"username": user, "password": pwd},
+                verify=False,
+                timeout=10,
+            )
+            data = _parse_api_response(resp)
+            if data.get("success"):
+                self._logged_in = True
+                logger.info("3X-UI: авторизация успешна")
+                return True
+            logger.error("3X-UI: ошибка авторизации — %s", data.get("msg", data))
+            return False
+        except Exception as e:
+            logger.error("3X-UI: ошибка подключения при логине — %s", e)
+            return False
+
+    def _ensure_login(self) -> None:
+        """Автоматический логин при необходимости."""
+        if not self._logged_in:
+            if not self.login():
+                raise ConnectionError("Не удалось подключиться к 3X-UI панели")
+
+    # ── Управление клиентами ──────────────────────────────────────────────────
+
+    def _client_payload(
+        self,
+        inbound_id: int,
+        uuid: str,
+        email: str,
+        sub_id: str,
+        expiry_time: int,
+        flow: str,
+    ) -> dict:
+        """Собирает payload для addClient / updateClient."""
+        settings = json.dumps({
+            "clients": [
+                {
+                    "id": uuid,
+                    "email": email,
+                    "enable": True,
+                    "expiryTime": expiry_time,
+                    "flow": flow,
+                    "limitIp": 3,
+                    "totalGB": 0,
+                    "subId": sub_id,
+                }
+            ]
+        })
+        return {"id": inbound_id, "settings": settings}
+
+    def add_client(
+        self,
+        inbound_id: int,
+        uuid: str,
+        email: str,
+        sub_id: str = "",
+        expiry_time: int = 0,
+        flow: str = "",
+    ) -> bool:
+        """
+        Добавить клиента к inbound.
+        email используется как уникальный идентификатор внутри 3X-UI.
+        sub_id — идентификатор подписки для subscription URL.
+        expiry_time — timestamp в миллисекундах (0 = бессрочно).
+        """
+        self._ensure_login()
+        url = self._url("panel/api/inbounds/addClient")
+        payload = self._client_payload(inbound_id, uuid, email, sub_id, expiry_time, flow)
+        try:
+            resp = self.session.post(url, json=payload, verify=False, timeout=10)
+            data = _parse_api_response(resp)
+            if data.get("success"):
+                logger.info("3X-UI: клиент добавлен — %s", email)
+                return True
+            logger.error("3X-UI: ошибка добавления клиента — %s", data)
+            return False
+        except Exception as e:
+            logger.error("3X-UI: ошибка при добавлении клиента — %s", e)
+            return False
+
+    def update_client(
+        self,
+        inbound_id: int,
+        uuid: str,
+        email: str,
+        sub_id: str = "",
+        expiry_time: int = 0,
+        flow: str = "",
+    ) -> bool:
+        """
+        Обновить параметры клиента (например, срок действия).
+        Идентификация — по UUID, не по email.
+        """
+        self._ensure_login()
+        url = self._url(f"panel/api/inbounds/updateClient/{uuid}")
+        payload = self._client_payload(inbound_id, uuid, email, sub_id, expiry_time, flow)
+        try:
+            resp = self.session.post(url, json=payload, verify=False, timeout=10)
+            data = _parse_api_response(resp)
+            if data.get("success"):
+                logger.info("3X-UI: клиент обновлён — %s, expiry=%s", email, expiry_time)
+                return True
+            logger.error("3X-UI: ошибка обновления клиента — %s", data)
+            return False
+        except Exception as e:
+            logger.error("3X-UI: ошибка при обновлении клиента — %s", e)
+            return False
+
+    def add_or_update_client(
+        self,
+        inbound_id: int,
+        uuid: str,
+        email: str,
+        sub_id: str = "",
+        expiry_time: int = 0,
+        flow: str = "",
+    ) -> bool:
+        """
+        Идемпотентная синхронизация клиента:
+        — пробует update_client (по UUID);
+        — если панель отвечает «not found», делает add_client;
+        — ошибки авторизации, таймаут и не-JSON НЕ считаются «not found»
+          и не приводят к попытке создания.
+
+        Используется при синхронизации на вторичные серверы, чтобы
+        при повторном вызове (продление, retry) не получать Duplicate email.
+        """
+        self._ensure_login()
+        url = self._url(f"panel/api/inbounds/updateClient/{uuid}")
+        payload = self._client_payload(inbound_id, uuid, email, sub_id, expiry_time, flow)
+        try:
+            resp = self.session.post(url, json=payload, verify=False, timeout=10)
+            data = _parse_api_response(resp)
+        except requests.exceptions.Timeout:
+            logger.error("3X-UI: таймаут при updateClient — %s", email)
+            return False
+        except Exception as e:
+            logger.error("3X-UI: ошибка при updateClient — %s", e)
+            return False
+
+        if data.get("success"):
+            logger.info("3X-UI: клиент обновлён (add_or_update) — %s, expiry=%s", email, expiry_time)
+            return True
+
+        # Если это не-JSON ответ (HTML, 502) — не пытаемся добавить, это проблема связи.
+        msg = str(data.get("msg", "")).lower()
+        if msg.startswith("non-json") or msg.startswith("json parse"):
+            logger.error("3X-UI: non-JSON при updateClient, не делаем addClient — %s", email)
+            return False
+
+        # Если панель ответила «клиент не найден» — клиент ещё не существует, добавляем.
+        if any(marker in msg for marker in _NOT_FOUND_MARKERS):
+            logger.info("3X-UI: клиент не найден на сервере, делаем addClient — %s", email)
+            return self.add_client(inbound_id, uuid, email, sub_id=sub_id,
+                                   expiry_time=expiry_time, flow=flow)
+
+        # Любая другая ошибка (wrong inbound, Duplicate email на update и т.д.) — логируем.
+        logger.error("3X-UI: ошибка add_or_update_client — %s (email=%s)", data, email)
+        return False
+
+    def delete_client(self, inbound_id: int, uuid: str) -> bool:
+        """Удалить клиента из inbound по UUID."""
+        self._ensure_login()
+        url = self._url(f"panel/api/inbounds/{inbound_id}/delClient/{uuid}")
+        try:
+            resp = self.session.post(url, verify=False, timeout=10)
+            data = _parse_api_response(resp)
+            if data.get("success"):
+                logger.info("3X-UI: клиент удалён — %s", uuid)
+                return True
+            logger.error("3X-UI: ошибка удаления клиента — %s", data)
+            return False
+        except Exception as e:
+            logger.error("3X-UI: ошибка при удалении клиента — %s", e)
+            return False
