@@ -849,26 +849,23 @@ async def handle_yookassa_webhook(request: web.Request) -> web.Response:
         payment = await get_payment(payment_id)
         if not payment:
             logger.warning("Payment not found in DB: %s", payment_id)
-            # Всё равно возвращаем 200, чтобы YooKassa не повторяла запрос
             return web.Response(status=200, text="OK")
 
-        # Обновляем статус платежа
         if status == "succeeded":
-            # Идемпотентность: если платёж уже обработан — молча игнорируем повтор
-            if payment.get("status") == "succeeded":
-                logger.warning("Duplicate webhook for already succeeded payment: %s", payment_id)
-                return web.Response(status=200, text="OK")
-
             from datetime import datetime
-            await update_payment_status(payment_id, "succeeded", datetime.utcnow().isoformat())
+            paid_at = datetime.utcnow().isoformat()
 
-            # Вызываем callback для активации подписки
+            # Idempotency and crash recovery are handled atomically inside the callback
+            # via begin_fulfillment (BEGIN IMMEDIATE). Always invoke the callback so that
+            # both first-time processing and sync-pending recovery are handled uniformly.
             if _payment_success_callback:
                 await _payment_success_callback(
+                    payment_id=payment_id,
                     user_id=data["user_id"],
                     plan_key=data["plan_key"],
                     server_id=data["server_id"],
                     amount=data["amount"],
+                    paid_at=paid_at,
                 )
             else:
                 logger.warning("Payment success callback not set!")

@@ -4,9 +4,10 @@
 """
 
 import os
-import shutil
+import sqlite3
 import logging
 from datetime import datetime, timedelta
+
 
 from config import DB_PATH, BACKUP_DIR
 
@@ -15,14 +16,25 @@ logger = logging.getLogger(__name__)
 
 def backup_now() -> str | None:
     """
-    Создать резервную копию БД.
+    Создать резервную копию БД через sqlite3.backup() (online backup API).
+    Корректно работает при открытых WAL-транзакциях — в отличие от cp/shutil.copy2,
+    которые могут захватить несогласованное состояние WAL.
     Возвращает путь к файлу бэкапа или None при ошибке.
     """
     os.makedirs(BACKUP_DIR, exist_ok=True)
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     dest = os.path.join(BACKUP_DIR, f"backup_{timestamp}.db")
     try:
-        shutil.copy2(DB_PATH, dest)
+        src_conn = sqlite3.connect(DB_PATH)
+        dst_conn = sqlite3.connect(dest)
+        try:
+            src_conn.backup(dst_conn)
+            integrity = dst_conn.execute("PRAGMA integrity_check").fetchone()[0]
+            if integrity != "ok":
+                raise RuntimeError(f"integrity_check failed on backup: {integrity}")
+        finally:
+            dst_conn.close()
+            src_conn.close()
         logger.info("Бэкап создан: %s", dest)
         _cleanup_old_backups()
         return dest
@@ -52,6 +64,9 @@ def restore_backup(date_str: str) -> bool:
     """
     Восстановить БД из бэкапа по дате (формат: YYYYMMDD_HHMMSS).
     Перед восстановлением создаёт страховочную копию текущей БД.
+
+    IMPORTANT: restoring does NOT roll back payments that arrived after the
+    backup was taken. Use only for code rollback, not DB rollback.
     """
     filename = f"backup_{date_str}.db"
     src = os.path.join(BACKUP_DIR, filename)
@@ -59,8 +74,14 @@ def restore_backup(date_str: str) -> bool:
         logger.error("Бэкап не найден: %s", src)
         return False
     try:
-        backup_now()  # страховочная копия
-        shutil.copy2(src, DB_PATH)
+        backup_now()  # страховочная копия текущего состояния
+        src_conn = sqlite3.connect(src)
+        dst_conn = sqlite3.connect(DB_PATH)
+        try:
+            src_conn.backup(dst_conn)
+        finally:
+            dst_conn.close()
+            src_conn.close()
         logger.info("БД восстановлена из: %s", filename)
         return True
     except Exception as e:

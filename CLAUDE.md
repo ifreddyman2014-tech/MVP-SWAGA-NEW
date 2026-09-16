@@ -363,10 +363,10 @@ git show ORIG_HEAD:bot.py > bot.py
 
 | Сервер | IP | VPN-порт | Панель 3X-UI | SSH-доступ |
 |---|---|---|---|---|
-| Франция (fr1) | `194.59.31.100` | 54232 | `:4444/iV31Zfverpgxjo2m6D` | root, пароль в keepass |
-| США 1 (us1) | `80.76.49.140` | 35887 | `:61753/8J0lp7fw3i0SRtKAp6` | root |
-| Великобритания (uk1) | `163.5.210.147` | 36158 | `:3226/HMy1GrTZpItXDZ8pv4/` | root, `vcS.iL6(1m46DY` |
-| США 2 (us2) | `31.57.38.104` | 52670 | `:448/GfyuolnBsW3xxkwVtB` | root |
+| Франция (fr1) | `194.59.31.100` | 54232 | `:4444/[panel-path]` | root — credentials stored locally |
+| США 1 (us1) | `80.76.49.140` | 35887 | `:61753/[panel-path]` | root — credentials stored locally |
+| Великобритания (uk1) | `163.5.210.147` | 36158 | `:3226/[panel-path]` | root — credentials stored locally |
+| США 2 (us2) | `31.57.38.104` | 52670 | `:448/[panel-path]` | root — credentials stored locally |
 
 **Важно:** fr1 (194.59.31.100) — это одновременно бот-сервер и VPN-сервер. На нём крутятся `vpnbot`, `swaga-support` и xray.
 
@@ -427,26 +427,31 @@ journalctl -u vpnbot -n 20 --no-pager
 
 ### Реальная нагрузка на VPN-серверах (соединения + CPU)
 ```bash
+# Credentials are stored locally outside git. Do not commit secrets.
+# Use: sshpass -p '[SSH_PASS]' ssh root@<IP> "<command>"
+
 # fr1
-sshpass -p 'IDcG6b7v(1!3Cq' ssh root@194.59.31.100 \
+sshpass -p '[SSH_PASS]' ssh root@194.59.31.100 \
   "uptime && ss -tn state established | grep :54232 | wc -l && ps aux | grep xray | grep -v grep | awk '{print \"CPU:\"\$3\"% MEM:\"\$4\"%\"}'"
 
 # us1
-sshpass -p 'S{ZaXcZ:33i9' ssh root@80.76.49.140 \
+sshpass -p '[SSH_PASS]' ssh root@80.76.49.140 \
   "uptime && ss -tn state established | grep :35887 | wc -l && ps aux | grep xray | grep -v grep | awk '{print \"CPU:\"\$3\"% MEM:\"\$4\"%\"}'"
 
 # uk1
-sshpass -p 'LrU8qf1v0a1E79ZKSm' ssh root@45.95.18.254 \
-  "uptime && ss -tn state established | grep :17720 | wc -l && ps aux | grep xray | grep -v grep | awk '{print \"CPU:\"\$3\"% MEM:\"\$4\"%\"}'"
+sshpass -p '[SSH_PASS]' ssh root@163.5.210.147 \
+  "uptime && ss -tn state established | grep :36158 | wc -l && ps aux | grep xray | grep -v grep | awk '{print \"CPU:\"\$3\"% MEM:\"\$4\"%\"}'"
 
 # us2
-sshpass -p 'FMiKzwBXUs6q' ssh root@31.57.38.104 \
+sshpass -p '[SSH_PASS]' ssh root@31.57.38.104 \
   "uptime && ss -tn state established | grep :52670 | wc -l && ps aux | grep xray | grep -v grep | awk '{print \"CPU:\"\$3\"% MEM:\"\$4\"%\"}'"
 ```
 
 ### Все серверы одной командой
 ```bash
-for S in "fr1|194.59.31.100|IDcG6b7v(1!3Cq|54232" "us1|80.76.49.140|S{ZaXcZ:33i9|35887" "uk1|163.5.210.147|vcS.iL6(1m46DY|36158" "us2|31.57.38.104|FMiKzwBXUs6q|52670"; do
+# Credentials are stored locally outside git. Do not commit secrets.
+# Fill in [SSH_PASS] values from your local credentials store before running.
+for S in "fr1|194.59.31.100|[SSH_PASS]|54232" "us1|80.76.49.140|[SSH_PASS]|35887" "uk1|163.5.210.147|[SSH_PASS]|36158" "us2|31.57.38.104|[SSH_PASS]|52670"; do
   N=$(echo $S|cut -d'|' -f1); IP=$(echo $S|cut -d'|' -f2)
   PASS=$(echo $S|cut -d'|' -f3); PORT=$(echo $S|cut -d'|' -f4)
   echo -n "$N: "
@@ -458,6 +463,109 @@ done
 ---
 
 ## 📝 CHANGELOG
+
+### 16.09.2026 — Атомарное начисление доступа + тесты + подготовка к выпуску
+
+#### ⚠️ ВЛИЯНИЕ НА US2 — ТРЕБУЕТ ОТДЕЛЬНОГО СОГЛАСОВАНИЯ
+
+Синхронизация клиентов на US2 изменилась с предыдущей сессии (15.09.2026):
+- **Было:** `addClient` при каждом sync → создавались дубликаты в панели US2.
+- **Стало:** `add_or_update_client` (update-first, idempotent) → дубликаты устранены.
+- US2 не перезапускался, конфиг не менялся, VPN не прерывался.
+- Изменение затрагивает следующие пути: продление подписки (`handle_payment_success`),
+  синхронизацию на все серверы (`_sync_client_to_other_servers`), стартовую синхронизацию
+  незавершённых начислений (`_startup_sync_pending_fulfillments`).
+- **Перед деплоем** требуется явное согласование этого изменения для US2.
+
+**database.py:**
+- Добавлена колонка `fulfillment_status TEXT DEFAULT NULL` в таблицу payments.
+  Значения: NULL (старые записи), 'pending' (DB consistent, sync панели не завершён),
+  'fulfilled' (полностью завершено).
+- Добавлена `begin_fulfillment()`: атомарная запись через `BEGIN IMMEDIATE` —
+  одна транзакция помечает платёж как succeeded, записывает target_end_date,
+  обновляет/создаёт подписку и ставит fulfillment_status='pending'.
+  Сетевые вызовы (3X-UI) выполняются строго после commit.
+  Возврат: ('first'|'sync_pending'|'already_fulfilled'|'not_found', target_end, sub_info).
+  Два платежа одного пользователя сериализуются — каждый читает уже обновлённую end_date.
+- Добавлена `mark_payment_fulfilled(payment_id)`: переводит fulfillment_status в 'fulfilled'.
+- Добавлена `get_pending_fulfillments()`: возвращает платежи с fulfillment_status='pending'
+  для стартовой синхронизации. Реализует no-shrink: sync_end = max(target_end, sub.end_date).
+- `_read_sub_info_on_conn()`: внутренний хелпер для чтения sub_info внутри транзакции.
+- Все try/except в блоках ALTER TABLE миграций: `Exception` → `sqlite3.OperationalError`.
+- fulfillment_status добавлена в CREATE TABLE payments (для новых установок).
+
+**sub_app.py:**
+- Удалена `_recover_if_needed()` — заменена атомарным механизмом begin_fulfillment.
+- Webhook handler упрощён: всегда вызывает callback с `paid_at`. Idempotency и crash recovery
+  обеспечиваются внутри callback через begin_fulfillment.
+
+**bot.py:**
+- `handle_payment_success` принимает `paid_at: str = ""`.
+- Renewal path: `set_payment_target_end + extend_subscription_to_date` заменены вызовом
+  `begin_fulfillment(is_renewal=True, existing_uuid=...)`.
+- New-sub path: UUID/sub_id/email генерируются до begin_fulfillment.
+  `set_payment_target_end + deactivate_user_subs + create_subscription` заменены вызовом
+  `begin_fulfillment(is_renewal=False, new_uuid=...)`. Сетевые вызовы (add_or_update_client)
+  — после commit. На сетевой ошибке fulfillment_status='pending' — стартовая синхронизация
+  повторит.
+- Добавлена `_startup_sync_pending_fulfillments()`: вызывается в on_startup после init_db.
+  Находит pending fulfillments и повторяет sync панелей без пересчёта дней.
+- Добавлен вызов `mark_payment_fulfilled(payment_id)` после успешной синхронизации.
+
+**backup.py:**
+- `backup_now()` переведён с `shutil.copy2` на `sqlite3.backup()` (online backup API):
+  корректно работает при открытых WAL-транзакциях, гарантирует консистентный снапшот.
+- Добавлена проверка `PRAGMA integrity_check` на бэкапе.
+- `restore_backup()` аналогично переведён на `sqlite3.backup()`.
+- Удалён неиспользуемый import `shutil`.
+
+**scripts/reconcile_expiry.py:**
+- Исправлена загрузка серверов: `servers.json` имеет формат `{"servers": [...]}`,
+  скрипт теперь корректно извлекает список через `.get("servers", data)`.
+
+**tests/test_payment_logic.py:**
+- Тесты 11-13 (проверка удалённой `_recover_if_needed`) заменены на тесты для begin_fulfillment:
+  - test_11: begin_fulfillment renewal 'first' path — atomicity, fulfillment_status='pending'
+  - test_12: begin_fulfillment new sub без существующей подписки — sub создаётся в DB
+  - test_13: concurrent BEGIN IMMEDIATE — только один возвращает 'first'
+  - test_14: два платежа одного пользователя — дни накапливаются без перезаписи
+  - test_15: 'sync_pending' + no-shrink — expiry_ms = max(target_end, sub.end_date)
+- Итого: 15/15 passed.
+
+**Git / безопасность:**
+- `git rm --cached .env` — .env убран из отслеживания, рабочий файл сохранён.
+- .gitignore уже содержал правила для .env и *.db.
+- ВАЖНО: .env присутствует в git-истории (коммиты b79dd51, 8c1267b) и был запушен
+  на ветку origin/claude/refactor-telegram-vpn-bot-COHgs. Токены скомпрометированы.
+  Ротация токенов — отдельное согласование. История не переписана (без явного разрешения).
+
+#### Dry-run результаты
+
+**migration_fix_plan.py:**
+- Активных trial-подписок: 14
+- К исправлению (plan: trial → платный): 9
+- Неоднозначных (несколько plan_key в периоде, пропущены): 3 → ручной разбор
+- Без платежей (легитимный trial/giveaway): 2
+- Примечание: `paid_at >= sub.start_date` — необходимое, но не достаточное условие.
+  Неоднозначные случаи не исправляются автоматически.
+
+**reconcile_expiry.py:**
+- Серверов проверено: 4 (fr1, us1, us1-xhttp, uk1-xhttp; us2/ws исключены)
+- Активных подписок в DB: 101
+- Панель отстаёт от DB: 19 → можно --apply (поштучно, с подтверждением)
+- Панель опережает DB: 0 → ничего применять нельзя
+- Не найдено в панели: 1 (us1, план 3m)
+- uk1-xhttp: ошибка парсинга настроек inbound (JSON вместо строки в settings) → SKIP
+
+#### Расположение и состояние перед деплоем
+
+- Ветка: `dashboard-v1`, HEAD: `e8cbc51` + незакоммиченные изменения
+- Изменённые файлы: `database.py`, `sub_app.py`, `bot.py`, `backup.py`,
+  `scripts/reconcile_expiry.py`, `tests/test_payment_logic.py`, `CLAUDE.md`
+- Удалено из git-индекса: `.env` (требует включения в коммит как `git rm --cached .env`)
+- Бэкап DB: `backups/vpn_bot_audit_fix_20260915_214332.db` (старый, из прошлой сессии)
+- Перед коммитом: сделать новый бэкап через `backup_now()` (теперь использует SQLite API)
+- Продакшн не перезапускался. Изменения применяются только после явного согласования.
 
 ### 15.09.2026 — Аудит + фикс платёжных багов (Duplicate email, plan='trial', идемпотентность)
 
@@ -725,7 +833,7 @@ vless://UUID@uk.swaga-vpn.ru:443?security=tls&type=ws&path=%2Fswaga-uk-ws&host=u
   Исправлено: все 7 блоков заменены на `protocol = "https" if getattr(server, "xui_ssl", True) else "http"`.
 
 **Известная задача (требует доступа к серверу uk1):**
-- 3X-UI панель на 163.5.210.147:3226 возвращает 404 на все пути, включая `/HMy1GrTZpItXDZ8pv4/`
+- 3X-UI панель на 163.5.210.147:3226 возвращает 404 на все пути, включая `/[panel-path]/`
 - Web path панели изменился (вероятно, после сброса/переустановки)
 - Для фикса: зайти на сервер, выполнить `sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webBasePath';"` и обновить `xui_web_path` в servers.json
 - VPN (порт 443) работает — существующие пользователи подключены
@@ -765,7 +873,7 @@ vless://UUID@uk.swaga-vpn.ru:443?security=tls&type=ws&path=%2Fswaga-uk-ws&host=u
 - Реальная проблема (из лога бота): CSRF + trailing slash в xui_web_path.
 
 **servers.json:**
-- uk1 `xui_web_path`: убран trailing slash `/HMy1GrTZpItXDZ8pv4/` → `/HMy1GrTZpItXDZ8pv4`.
+- uk1 `xui_web_path`: убран trailing slash `/[panel-path]/` → `/[panel-path]`.
   Из-за trailing slash URL строился как `...//login` (двойной слеш) → 404/empty body.
 
 **xui_api.py:**
@@ -809,7 +917,7 @@ vless://UUID@uk.swaga-vpn.ru:443?security=tls&type=ws&path=%2Fswaga-uk-ws&host=u
 ### 29.06.2026 — Замена сервера Великобритания + удаление gRPC
 
 **servers.json:**
-- uk1: IP заменён с `45.95.18.254` на `163.5.210.147`, порт VPN `36158`, панель `:3226/HMy1GrTZpItXDZ8pv4/`, inbound_id=2, `xui_ssl=false`
+- uk1: IP заменён с `45.95.18.254` на `163.5.210.147`, порт VPN `36158`, панель `:3226/[panel-path]`, inbound_id=2, `xui_ssl=false`
 - fr1: удалены поля grpc_inbound_id, grpc_service_name, grpc_domain, grpc_port
 
 **servers.py:**

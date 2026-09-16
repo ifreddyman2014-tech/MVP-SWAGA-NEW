@@ -38,6 +38,10 @@ from database import (
     process_referral_bonus,
     extend_subscription,
     extend_subscription_to_date,
+    set_payment_target_end,
+    begin_fulfillment,
+    mark_payment_fulfilled,
+    get_pending_fulfillments,
     count_users,
     REFERRAL_BONUS_DAYS,
     create_payment as db_create_payment,
@@ -86,6 +90,9 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot)
 xui = XUIAPI()
+
+# Servers that must never be touched by automatic sync (protected reserve).
+_PROTECTED_SERVER_IDS = {"us2", "us2-ws"}
 
 
 # ── Уведомления админам ──────────────────────────────────────────────────────
@@ -1976,6 +1983,9 @@ def _sync_client_to_other_servers(
     for server in enabled_servers:
         if server.id == primary_server_id:
             continue
+        if server.id in _PROTECTED_SERVER_IDS:
+            logger.warning("sync: protected server %s excluded from sync target (uuid=%s)", server.id, uuid)
+            continue
         try:
             ok = _server_sync_client(
                 server, uuid, email,
@@ -2882,14 +2892,21 @@ async def handle_payment_success(
     plan_key: str,
     server_id: str,
     amount: float,
+    payment_id: str = "",
+    paid_at: str = "",
 ) -> None:
     """
     Callback для обработки успешного платежа от YooKassa.
-    Проверяет существующую подписку и продлевает или создаёт новую.
+
+    begin_fulfillment (BEGIN IMMEDIATE) atomically: records payment as succeeded,
+    stores target_end_date, updates/creates the subscription, marks fulfillment='pending'.
+    Network calls (3X-UI panel sync) happen AFTER the transaction commits.
+    On 'sync_pending' (process crashed after commit but before sync), network calls
+    are retried idempotently. On 'already_fulfilled', the call is a no-op.
     """
     logger.info(
-        "Payment success: user=%s, plan=%s, server=%s, amount=%s",
-        user_id, plan_key, server_id, amount
+        "Payment success: user=%s, plan=%s, server=%s, amount=%s, payment_id=%s",
+        user_id, plan_key, server_id, amount, payment_id
     )
 
     plan = PLANS.get(plan_key)
@@ -2911,22 +2928,27 @@ async def handle_payment_success(
 
     # ── Если есть активная подписка на ТОМ ЖЕ сервере — продлеваем ─────────
     if existing_sub and existing_sub.get("vless_uuid") and not is_server_change:
-        # Продление: добавляем дни к текущей дате окончания
-        current_end = datetime.fromisoformat(existing_sub["end_date"])
-        base_date = max(current_end, now)
-        end = base_date + timedelta(days=plan["days"])
-
-        # Обновляем дату окончания в БД
-        await extend_subscription_to_date(user_id, end, plan=plan_key)
-
-        # Используем существующий конфиг
-        new_uuid = existing_sub["vless_uuid"]
-        sub_id = existing_sub.get("xui_sub_id", "")
-        actual_server_id = existing_sub.get("server_id", "default")
-        email = existing_sub.get("xui_email", f"tg_{user_id}")
-
-        # Обновляем expiry в 3X-UI панели
-        new_expiry_ms = int(end.timestamp() * 1000)
+        # Atomic: payment marked succeeded+pending, subscription end_date updated — one transaction.
+        # Network calls happen only after this returns.
+        result_code, _target_end, sub_info = await begin_fulfillment(
+            payment_id, user_id, plan_key, plan["days"],
+            paid_at or now.isoformat(),
+            is_renewal=True,
+            existing_uuid=existing_sub["vless_uuid"],
+        )
+        if result_code == "already_fulfilled":
+            logger.info("Payment %s already fulfilled, skipping", payment_id)
+            return
+        if result_code == "not_found":
+            logger.error("Payment %s not found in DB during renewal", payment_id)
+            return
+        # 'first' or 'sync_pending': do/redo the VPN panel network calls
+        new_uuid = sub_info["uuid"]
+        sub_id = sub_info["xui_sub_id"]
+        actual_server_id = sub_info["server_id"]
+        email = sub_info["email"]
+        end = datetime.fromisoformat(sub_info["end_date"])
+        new_expiry_ms = sub_info["expiry_ms"]
         if actual_server_id and actual_server_id != "default":
             server = server_manager.get_server(actual_server_id)
             vpn_host = server.host if server else VPN_HOST
@@ -2970,6 +2992,8 @@ async def handle_payment_success(
             except Exception as e:
                 logger.warning("Не удалось обновить expiry в панели: %s", e)
 
+        if payment_id:
+            await mark_payment_fulfilled(payment_id)
         is_extension = True
         logger.info("Extending subscription for user %s to %s", user_id, end)
 
@@ -2993,28 +3017,56 @@ async def handle_payment_success(
             server = enabled[0] if enabled else None
             use_default = server is None
 
-        # Суммируем дни с существующей подпиской (даже при смене сервера)
-        if existing_sub and existing_sub.get("end_date"):
-            current_end = datetime.fromisoformat(existing_sub["end_date"])
-            base_date = max(current_end, now)
-        else:
-            base_date = now
-        end = base_date + timedelta(days=plan["days"])
-        expiry_ms = int(end.timestamp() * 1000)  # 3X-UI использует миллисекунды
-
+        # Pre-generate VPN identity BEFORE the atomic DB transaction
         new_uuid = generate_uuid()
         sub_id = generate_sub_id()
         email = f"tg_{user_id}_{int(now.timestamp())}"
+        if server and not use_default:
+            actual_server_id = server.id
+        else:
+            actual_server_id = "default"
+
+        # Atomic: payment marked succeeded+pending, old subs deactivated, new sub inserted.
+        # Network calls (add to panel) happen only after commit.
+        result_code, _target_end, sub_info = await begin_fulfillment(
+            payment_id, user_id, plan_key, plan["days"],
+            paid_at or now.isoformat(),
+            is_renewal=False,
+            new_uuid=new_uuid,
+            new_sub_id=sub_id,
+            new_email=email,
+            new_server_id=actual_server_id,
+            new_start_date=now.isoformat(),
+        )
+        if result_code == "already_fulfilled":
+            logger.info("Payment %s already fulfilled, skipping", payment_id)
+            return
+        if result_code == "not_found":
+            logger.error("Payment %s not found in DB during new-sub creation", payment_id)
+            return
+        # 'sync_pending': process crashed after commit — use the stored sub identity
+        if result_code == "sync_pending":
+            new_uuid = sub_info["uuid"] or new_uuid
+            sub_id = sub_info["xui_sub_id"] or sub_id
+            email = sub_info["email"] or email
+            actual_server_id = sub_info["server_id"] or actual_server_id
+            if actual_server_id and actual_server_id != "default":
+                server = server_manager.get_server(actual_server_id) or server
+
+        end = datetime.fromisoformat(sub_info["end_date"])
+        expiry_ms = sub_info["expiry_ms"]
 
         try:
-            if use_default:
-                success = xui.add_client(
+            if use_default or actual_server_id == "default":
+                success = xui.add_or_update_client(
+                    INBOUND_ID, new_uuid, email,
+                    sub_id=sub_id, expiry_time=expiry_ms
+                ) if hasattr(xui, "add_or_update_client") else xui.add_client(
                     INBOUND_ID, new_uuid, email,
                     sub_id=sub_id, expiry_time=expiry_ms
                 )
                 vpn_host = VPN_HOST
                 vpn_port = VPN_PORT
-                actual_server_id = "default"
             else:
                 success = _server_add_client(
                     server, new_uuid, email,
@@ -3022,9 +3074,9 @@ async def handle_payment_success(
                 )
                 vpn_host = server.host
                 vpn_port = server.vpn_port
-                actual_server_id = server.id
-                server.current_users += 1
-                # Регистрируем UUID на всех остальных включённых серверах
+                if result_code == "first":
+                    server.current_users += 1
+                # Sync to all other enabled servers
                 other_servers = [s for s in server_manager.get_all_servers() if s.enabled]
                 if len(other_servers) > 1:
                     loop = asyncio.get_event_loop()
@@ -3048,20 +3100,17 @@ async def handle_payment_success(
                 )
             except Exception:
                 pass
+            # Subscription IS already in DB (begin_fulfillment committed). Startup sync
+            # will retry the panel call on next restart. Do NOT return without mark_fulfilled —
+            # this leaves fulfillment_status='pending' so startup sync picks it up.
+            if payment_id:
+                logger.warning(
+                    "Panel sync failed for payment %s; startup sync will retry", payment_id
+                )
             return
 
-        # Деактивируем старые подписки и создаём новую
-        await deactivate_user_subs(user_id)
-        await create_subscription(
-            user_id=user_id,
-            plan=plan_key,
-            start_date=now.isoformat(),
-            end_date=end.isoformat(),
-            vless_uuid=new_uuid,
-            xui_sub_id=sub_id,
-            server_id=actual_server_id,
-            xui_email=email,
-        )
+        if payment_id:
+            await mark_payment_fulfilled(payment_id)
 
     # Реферальный бонус
     referral_bonus_text = ""
@@ -3206,6 +3255,83 @@ async def handle_payment_success(
         logger.error("Ошибка уведомления админов: %s", e)
 
 
+async def _startup_sync_pending_fulfillments() -> None:
+    """
+    On startup, find payments with fulfillment_status='pending' and retry the VPN
+    panel sync. These are payments where the DB was committed (subscription is valid)
+    but the process crashed before syncing the panel.
+
+    Uses the no-shrink invariant: sync expiry = max(target_end_date, current sub.end_date).
+    Never re-extends the subscription — only pushes the already-committed end_date to panels.
+    """
+    from servers import server_manager
+    if not server_manager.servers:
+        server_manager.load_config()
+
+    pending = await get_pending_fulfillments()
+    if not pending:
+        return
+
+    logger.info("STARTUP SYNC: %d pending fulfillment(s) found — retrying panel sync", len(pending))
+
+    for pmt in pending:
+        payment_id = pmt["payment_id"]
+        user_id = pmt["user_id"]
+        uuid = pmt.get("vless_uuid")
+        email = pmt.get("xui_email", "")
+        xui_sub_id = pmt.get("xui_sub_id", "")
+        srv_id = pmt.get("server_id", "")
+        expiry_ms = pmt.get("expiry_ms", 0)
+        sync_end = pmt.get("sync_end_date", "")
+
+        if not uuid:
+            logger.error(
+                "STARTUP SYNC: payment %s pending but no vless_uuid in sub for user %s — "
+                "manual review needed",
+                payment_id, user_id,
+            )
+            continue
+
+        logger.info(
+            "STARTUP SYNC: retrying panel sync for payment %s user %s server %s expiry %s",
+            payment_id, user_id, srv_id, sync_end,
+        )
+        try:
+            if srv_id and srv_id != "default":
+                if srv_id in _PROTECTED_SERVER_IDS:
+                    logger.warning(
+                        "STARTUP SYNC: payment %s — primary server %s is protected, "
+                        "skipping sync (subscription remains valid in DB)",
+                        payment_id, srv_id,
+                    )
+                    continue
+                server = server_manager.get_server(srv_id)
+                if server:
+                    ok = _server_add_client(
+                        server, uuid, email,
+                        sub_id=xui_sub_id, expiry_ms=expiry_ms, flow=getattr(server, "flow", ""),
+                    )
+                    if ok:
+                        all_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+                        if len(all_servers) > 1:
+                            loop = asyncio.get_event_loop()
+                            await loop.run_in_executor(
+                                None, _sync_client_to_other_servers,
+                                uuid, email, xui_sub_id, expiry_ms, srv_id, all_servers,
+                                True,  # is_renewal (updating expiry)
+                            )
+                    else:
+                        logger.error("STARTUP SYNC: panel add/update failed for payment %s", payment_id)
+                        continue
+                else:
+                    logger.error("STARTUP SYNC: server %s not found for payment %s", srv_id, payment_id)
+                    continue
+            await mark_payment_fulfilled(payment_id)
+            logger.info("STARTUP SYNC: payment %s marked fulfilled", payment_id)
+        except Exception as e:
+            logger.error("STARTUP SYNC: error for payment %s: %s", payment_id, e)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 #  STARTUP / SHUTDOWN
 # ══════════════════════════════════════════════════════════════════════════════
@@ -3257,6 +3383,12 @@ async def on_startup(_dp: Dispatcher) -> None:
 
     # Запуск сервера подписок
     await start_sub_server()
+
+    # Retry pending fulfillments from any crash before last restart
+    try:
+        await _startup_sync_pending_fulfillments()
+    except Exception as e:
+        logger.error("Startup sync error: %s", e)
 
     # Запуск фоновых задач
     asyncio.create_task(_scheduler_expiration_check())

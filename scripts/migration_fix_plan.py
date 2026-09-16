@@ -3,17 +3,24 @@
 Dry-run migration: fix plan='trial' for users who have paid.
 
 Identifies active subscriptions where plan='trial' but the user has a
-succeeded payment, then proposes correcting the plan field to match
-the last succeeded payment's plan_key.
+succeeded payment that was processed AFTER this subscription started.
+Proposes correcting the plan field to match the payment's plan_key.
+
+Payment-to-subscription linkage rule:
+  A payment is linked to the current subscription only if
+  paid_at >= subscription.start_date. This excludes payments from
+  prior subscription periods (e.g. old 1m paid a year ago when the
+  user now has a fresh trial).
 
 Rules:
   - Only considers active subscriptions (is_active=1).
-  - Never changes end_date.
-  - If a user has multiple payments with different plan_keys, flags
-    as AMBIGUOUS and skips (manual review required).
-  - Idempotent: safe to run multiple times.
+  - Never changes end_date (only the plan label).
+  - If a user has multiple payments with different paid plan_keys
+    within this sub period, flags as AMBIGUOUS and skips (manual review).
+  - Idempotent: running twice makes no additional changes (pre-check
+    confirms plan is still 'trial' before each UPDATE).
   - Default mode: DRY RUN (prints proposed changes, no DB writes).
-  - Pass --apply to commit changes inside a transaction with a pre-check.
+  - Pass --apply to commit changes inside a transaction.
 
 Usage:
     python scripts/migration_fix_plan.py [--apply] [--user USER_ID]
@@ -38,7 +45,7 @@ async def run(db_path: str, apply: bool, target_user: int | None):
 
         # Active trial subscriptions
         cur = await db.execute("""
-            SELECT s.sub_id, s.user_id, s.plan, s.end_date, s.is_active
+            SELECT s.sub_id, s.user_id, s.plan, s.start_date, s.end_date, s.is_active
             FROM subscriptions s
             WHERE s.plan = 'trial'
               AND s.is_active = 1
@@ -58,21 +65,23 @@ async def run(db_path: str, apply: bool, target_user: int | None):
 
         for sub in trial_subs:
             uid = sub["user_id"]
-            # Get all succeeded payments for this user
+            # Only include payments that occurred DURING this subscription period.
+            # paid_at >= start_date ensures we're linking to THIS sub, not a prior one.
             cur = await db.execute("""
                 SELECT plan_key, paid_at, amount
                 FROM payments
                 WHERE user_id = ?
                   AND status = 'succeeded'
+                  AND paid_at >= ?
                 ORDER BY paid_at DESC
-            """, (uid,))
+            """, (uid, sub["start_date"]))
             payments = [dict(r) for r in await cur.fetchall()]
 
             if not payments:
                 no_payment.append(sub)
                 continue
 
-            # Distinct paid plan_keys (excluding 'trial' if somehow present)
+            # Distinct paid plan_keys (exclude free/giveaway keys)
             paid_plans = list(dict.fromkeys(
                 p["plan_key"] for p in payments
                 if p["plan_key"] not in ("trial", "giveaway_7d", "giveaway_365d")
@@ -95,6 +104,7 @@ async def run(db_path: str, apply: bool, target_user: int | None):
                 "user_id": uid,
                 "current_plan": sub["plan"],
                 "new_plan": paid_plans[0],
+                "start_date": sub["start_date"],
                 "end_date": sub["end_date"],
                 "last_payment": payments[0],
             })
@@ -110,14 +120,16 @@ async def run(db_path: str, apply: bool, target_user: int | None):
                 lp = fix["last_payment"]
                 print(f"  user={fix['user_id']} sub={fix['sub_id']} "
                       f"plan: trial → {fix['new_plan']} "
-                      f"(end={fix['end_date']}, last_paid={lp['paid_at']}, {lp['amount']}₽)")
+                      f"(sub_start={fix['start_date'][:10]}, end={fix['end_date'][:10]}, "
+                      f"last_paid={lp['paid_at'][:10]}, {lp['amount']}₽)")
 
         if ambiguous:
             print(f"\n── Ambiguous (SKIPPED — manual review) ──")
             for item in ambiguous:
                 sub = item["sub"]
                 print(f"  user={sub['user_id']} sub={sub['sub_id']} "
-                      f"end={sub['end_date']} plans={item['paid_plans']}")
+                      f"start={sub['start_date'][:10]} end={sub['end_date'][:10]} "
+                      f"plans={item['paid_plans']}")
 
         if not to_fix:
             print("\nNothing to apply.")
@@ -127,15 +139,12 @@ async def run(db_path: str, apply: bool, target_user: int | None):
             print(f"\n[DRY RUN] Pass --apply to commit {len(to_fix)} change(s).")
             return 1
 
-        # Apply inside a transaction with pre-check
+        # Apply inside a transaction with pre-check per row
         print(f"\nApplying {len(to_fix)} fix(es) inside transaction...")
-        async with db.execute("BEGIN") as _:
-            pass  # aiosqlite: use explicit transaction
-        await db.execute("BEGIN")
         try:
             applied = 0
             for fix in to_fix:
-                # Pre-check: still trial and still active
+                # Pre-check: still trial and still active (idempotency guard)
                 cur = await db.execute("""
                     SELECT plan, is_active FROM subscriptions WHERE sub_id = ?
                 """, (fix["sub_id"],))
@@ -168,7 +177,8 @@ async def run(db_path: str, apply: bool, target_user: int | None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--apply", action="store_true",
                         help="Commit changes (default is dry-run)")
     parser.add_argument("--user", type=int, metavar="USER_ID",

@@ -3,6 +3,8 @@
 Таблицы: users, subscriptions, transactions.
 """
 
+import sqlite3
+
 import aiosqlite
 from datetime import datetime, timedelta
 
@@ -39,36 +41,36 @@ async def init_db() -> None:
         # Миграция: добавить xui_sub_id если таблица уже существует
         try:
             await db.execute("ALTER TABLE subscriptions ADD COLUMN xui_sub_id TEXT DEFAULT ''")
-        except Exception:
+        except sqlite3.OperationalError:
             pass  # колонка уже существует
         # Миграция: добавить reminder_sent для отслеживания отправленных напоминаний
         try:
             await db.execute("ALTER TABLE subscriptions ADD COLUMN reminder_sent TEXT DEFAULT ''")
-        except Exception:
+        except sqlite3.OperationalError:
             pass  # колонка уже существует
         # Миграция: добавить реферальные колонки
         try:
             await db.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER DEFAULT NULL")
-        except Exception:
+        except sqlite3.OperationalError:
             pass
         try:
             await db.execute("ALTER TABLE users ADD COLUMN referral_bonus_given INTEGER DEFAULT 0")
-        except Exception:
+        except sqlite3.OperationalError:
             pass
         # Миграция: добавить server_id для мультисервера
         try:
             await db.execute("ALTER TABLE subscriptions ADD COLUMN server_id TEXT DEFAULT ''")
-        except Exception:
+        except sqlite3.OperationalError:
             pass
         # Миграция: добавить xui_email для обновления клиента в панели
         try:
             await db.execute("ALTER TABLE subscriptions ADD COLUMN xui_email TEXT DEFAULT ''")
-        except Exception:
+        except sqlite3.OperationalError:
             pass
         # Миграция: добавить флаг получения компенсации
         try:
             await db.execute("ALTER TABLE users ADD COLUMN compensation_claimed INTEGER DEFAULT 0")
-        except Exception:
+        except sqlite3.OperationalError:
             pass
         await db.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
@@ -83,18 +85,34 @@ async def init_db() -> None:
         # Таблица платежей YooKassa
         await db.execute("""
             CREATE TABLE IF NOT EXISTS payments (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                payment_id    TEXT    UNIQUE NOT NULL,
-                user_id       INTEGER NOT NULL,
-                amount        REAL    NOT NULL,
-                plan_key      TEXT    NOT NULL,
-                server_id     TEXT    DEFAULT '',
-                status        TEXT    DEFAULT 'pending',
-                created_at    TEXT    NOT NULL,
-                paid_at       TEXT    DEFAULT NULL,
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                payment_id         TEXT    UNIQUE NOT NULL,
+                user_id            INTEGER NOT NULL,
+                amount             REAL    NOT NULL,
+                plan_key           TEXT    NOT NULL,
+                server_id          TEXT    DEFAULT '',
+                status             TEXT    DEFAULT 'pending',
+                created_at         TEXT    NOT NULL,
+                paid_at            TEXT    DEFAULT NULL,
+                target_end_date    TEXT    DEFAULT NULL,
+                fulfillment_status TEXT    DEFAULT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
+        # Миграция: добавить target_end_date если таблица payments уже существует
+        try:
+            await db.execute(
+                "ALTER TABLE payments ADD COLUMN target_end_date TEXT DEFAULT NULL"
+            )
+        except sqlite3.OperationalError:
+            pass  # колонка уже существует
+        # Миграция: добавить fulfillment_status ('pending'=sync needed, 'fulfilled'=done, NULL=old)
+        try:
+            await db.execute(
+                "ALTER TABLE payments ADD COLUMN fulfillment_status TEXT DEFAULT NULL"
+            )
+        except sqlite3.OperationalError:
+            pass  # колонка уже существует
         await db.commit()
 
 
@@ -603,24 +621,28 @@ async def get_payment(payment_id: str) -> dict | None:
 async def update_payment_status(payment_id: str, status: str, paid_at: str = None) -> bool:
     """
     Обновить статус платежа.
-    Для status='succeeded' использует WHERE status != 'succeeded', чтобы конкурентный
-    повторный webhook не мог обработать уже завершённый платёж.
+    Для status='succeeded': атомарный guard WHERE status != 'succeeded'.
+    Возвращает True только если строка реально изменилась (rowcount > 0).
+    Возврат False для 'succeeded' означает: параллельный webhook уже обработал платёж.
     """
     async with aiosqlite.connect(DB_PATH) as db:
         if status == "succeeded":
             # Атомарный guard: обновляем только если ещё не succeeded
             if paid_at:
-                await db.execute(
+                cursor = await db.execute(
                     """UPDATE payments SET status = ?, paid_at = ?
                        WHERE payment_id = ? AND status != 'succeeded'""",
                     (status, paid_at, payment_id),
                 )
             else:
-                await db.execute(
+                cursor = await db.execute(
                     """UPDATE payments SET status = ?
                        WHERE payment_id = ? AND status != 'succeeded'""",
                     (status, payment_id),
                 )
+            await db.commit()
+            # rowcount == 0 означает: параллельный webhook уже обработал этот платёж
+            return cursor.rowcount > 0
         elif paid_at:
             await db.execute(
                 "UPDATE payments SET status = ?, paid_at = ? WHERE payment_id = ?",
@@ -633,6 +655,252 @@ async def update_payment_status(payment_id: str, status: str, paid_at: str = Non
             )
         await db.commit()
         return True
+
+
+async def set_payment_target_end(payment_id: str, target_end_date: str) -> None:
+    """
+    Зафиксировать целевую дату окончания подписки для данного платежа.
+    Вызывается как первое действие handle_payment_success — до extend_subscription_to_date.
+    Это позволяет безопасно повторять синхронизацию: вместо пересчёта от текущей
+    end_date берём сохранённое target_end_date, исключая повторное начисление дней.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE payments SET target_end_date = ? WHERE payment_id = ?",
+            (target_end_date, payment_id),
+        )
+        await db.commit()
+
+
+async def begin_fulfillment(
+    payment_id: str,
+    user_id: int,
+    plan_key: str,
+    plan_days: int,
+    paid_at: str,
+    *,
+    is_renewal: bool,
+    existing_uuid: str = "",
+    new_uuid: str = "",
+    new_sub_id: str = "",
+    new_email: str = "",
+    new_server_id: str = "",
+    new_start_date: str = "",
+) -> tuple[str, str | None, dict | None]:
+    """
+    Atomic payment fulfillment using BEGIN IMMEDIATE.
+
+    Separates provider status ('succeeded') from fulfillment status ('pending'/'fulfilled').
+    All four: payment status, target_end_date, subscription change, and sync task record
+    are written in a single transaction. Network calls happen AFTER this returns.
+
+    Returns (result_code, target_end_iso, sub_info):
+      'first'             — won the race; subscription updated; fulfillment_status='pending'
+      'sync_pending'      — DB already consistent, VPN panel sync still incomplete
+      'already_fulfilled' — fully processed; skip
+      'not_found'         — payment_id not in DB
+
+    sub_info keys: uuid, email, xui_sub_id, server_id, end_date, expiry_ms, is_renewal
+    """
+    now_dt = datetime.fromisoformat(paid_at) if paid_at else datetime.utcnow()
+    now_iso = paid_at or now_dt.isoformat()
+
+    async with aiosqlite.connect(DB_PATH, isolation_level=None) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            # Read payment state
+            cur = await db.execute(
+                "SELECT * FROM payments WHERE payment_id = ?", (payment_id,)
+            )
+            pmt = await cur.fetchone()
+            if not pmt:
+                await db.execute("ROLLBACK")
+                return ("not_found", None, None)
+            pmt = dict(pmt)
+            fs = pmt.get("fulfillment_status")
+
+            if fs == "fulfilled":
+                await db.execute("COMMIT")
+                return ("already_fulfilled", pmt.get("target_end_date"), None)
+
+            # status='succeeded' AND fs IS NULL → processed by code before this deploy
+            if pmt.get("status") == "succeeded" and fs is None:
+                await db.execute("COMMIT")
+                return ("already_fulfilled", pmt.get("target_end_date"), None)
+
+            if fs == "pending":
+                # Payment committed atomically but VPN panel sync incomplete
+                stored_target = pmt.get("target_end_date")
+                sub_info = await _read_sub_info_on_conn(
+                    db, user_id, stored_target or now_iso, now_iso
+                )
+                await db.execute("COMMIT")
+                return ("sync_pending", stored_target, sub_info)
+
+            # Fresh processing: status is still 'pending' (not yet 'succeeded')
+            # Read existing subscription inside the write lock
+            cur2 = await db.execute(
+                "SELECT * FROM subscriptions WHERE user_id = ? AND is_active = 1 "
+                "ORDER BY end_date DESC LIMIT 1",
+                (user_id,),
+            )
+            existing_sub = await cur2.fetchone()
+            existing_sub = dict(existing_sub) if existing_sub else None
+
+            # Compute target_end, accumulating from existing sub if any
+            if existing_sub and existing_sub.get("end_date"):
+                base_date = max(datetime.fromisoformat(existing_sub["end_date"]), now_dt)
+            else:
+                base_date = now_dt
+            target_end_dt = base_date + timedelta(days=plan_days)
+            target_end_iso = target_end_dt.isoformat()
+            expiry_ms = int(target_end_dt.timestamp() * 1000)
+
+            # Atomically claim the payment (guard: only if still not 'succeeded')
+            cur3 = await db.execute(
+                """UPDATE payments
+                   SET status = 'succeeded', paid_at = ?, target_end_date = ?,
+                       fulfillment_status = 'pending'
+                   WHERE payment_id = ? AND status != 'succeeded'""",
+                (now_iso, target_end_iso, payment_id),
+            )
+            if cur3.rowcount == 0:
+                # Another concurrent transaction won the race
+                await db.execute("ROLLBACK")
+                cur4 = await db.execute(
+                    "SELECT fulfillment_status, target_end_date FROM payments WHERE payment_id = ?",
+                    (payment_id,),
+                )
+                row4 = await cur4.fetchone()
+                row4 = dict(row4) if row4 else {}
+                if row4.get("fulfillment_status") == "pending":
+                    sub_info = await _read_sub_info_on_conn(
+                        db, user_id, row4.get("target_end_date") or now_iso, now_iso
+                    )
+                    return ("sync_pending", row4.get("target_end_date"), sub_info)
+                return ("already_fulfilled", row4.get("target_end_date"), None)
+
+            # Update subscription
+            if is_renewal and existing_sub and existing_sub.get("vless_uuid"):
+                await db.execute(
+                    "UPDATE subscriptions SET end_date = ?, plan = ? "
+                    "WHERE user_id = ? AND is_active = 1",
+                    (target_end_iso, plan_key, user_id),
+                )
+                uuid = existing_sub["vless_uuid"]
+                email = existing_sub.get("xui_email", f"tg_{user_id}")
+                xui_sub_id = existing_sub.get("xui_sub_id", "")
+                server_id_used = existing_sub.get("server_id", "")
+            else:
+                # New subscription (first buy or server change)
+                await db.execute(
+                    "UPDATE subscriptions SET is_active = 0 WHERE user_id = ? AND is_active = 1",
+                    (user_id,),
+                )
+                uuid = new_uuid
+                email = new_email
+                xui_sub_id = new_sub_id
+                server_id_used = new_server_id
+                await db.execute(
+                    """INSERT INTO subscriptions
+                       (user_id, plan, start_date, end_date, is_active,
+                        vless_uuid, xui_sub_id, server_id, xui_email)
+                       VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)""",
+                    (user_id, plan_key, new_start_date or now_iso,
+                     target_end_iso, uuid, xui_sub_id, server_id_used, email),
+                )
+
+            await db.execute("COMMIT")
+            sub_info = {
+                "uuid": uuid,
+                "email": email,
+                "xui_sub_id": xui_sub_id,
+                "server_id": server_id_used,
+                "end_date": target_end_iso,
+                "expiry_ms": expiry_ms,
+                "is_renewal": is_renewal and bool(existing_sub and existing_sub.get("vless_uuid")),
+            }
+            return ("first", target_end_iso, sub_info)
+
+        except Exception:
+            await db.execute("ROLLBACK")
+            raise
+
+
+async def _read_sub_info_on_conn(
+    db: aiosqlite.Connection,
+    user_id: int,
+    stored_target: str,
+    now_iso: str,
+) -> dict:
+    """Read current active sub from an open connection for sync_pending sub_info."""
+    cur = await db.execute(
+        "SELECT * FROM subscriptions WHERE user_id = ? AND is_active = 1 "
+        "ORDER BY end_date DESC LIMIT 1",
+        (user_id,),
+    )
+    row = await cur.fetchone()
+    row = dict(row) if row else {}
+    sub_end = row.get("end_date", stored_target)
+    # No-shrink: use max(target_end, current sub.end_date)
+    sync_end = max(stored_target, sub_end) if stored_target and sub_end else (stored_target or sub_end or now_iso)
+    sync_ms = int(datetime.fromisoformat(sync_end).timestamp() * 1000)
+    return {
+        "uuid": row.get("vless_uuid", ""),
+        "email": row.get("xui_email", ""),
+        "xui_sub_id": row.get("xui_sub_id", ""),
+        "server_id": row.get("server_id", ""),
+        "end_date": sync_end,
+        "expiry_ms": sync_ms,
+        "is_renewal": bool(row.get("vless_uuid")),
+    }
+
+
+async def mark_payment_fulfilled(payment_id: str) -> None:
+    """Mark a payment's fulfillment as complete (VPN panel sync done)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE payments SET fulfillment_status = 'fulfilled' WHERE payment_id = ?",
+            (payment_id,),
+        )
+        await db.commit()
+
+
+async def get_pending_fulfillments() -> list[dict]:
+    """
+    Return payments with fulfillment_status='pending' for startup sync.
+    These are payments where the DB is consistent but VPN panel sync is incomplete.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("""
+            SELECT p.payment_id, p.user_id, p.plan_key, p.target_end_date,
+                   s.vless_uuid, s.xui_email, s.xui_sub_id, s.server_id, s.end_date
+            FROM payments p
+            LEFT JOIN subscriptions s
+                ON s.user_id = p.user_id AND s.is_active = 1
+            WHERE p.fulfillment_status = 'pending'
+            ORDER BY p.paid_at ASC
+        """)
+        rows = await cur.fetchall()
+        result = []
+        for row in rows:
+            r = dict(row)
+            target = r.get("target_end_date")
+            sub_end = r.get("end_date")
+            # No-shrink: sync with max(target_end, current sub.end_date)
+            if target and sub_end:
+                sync_end = max(target, sub_end)
+            else:
+                sync_end = target or sub_end
+            r["sync_end_date"] = sync_end
+            if sync_end:
+                r["expiry_ms"] = int(datetime.fromisoformat(sync_end).timestamp() * 1000)
+            else:
+                r["expiry_ms"] = 0
+            result.append(r)
+        return result
 
 
 async def get_pending_payment(user_id: int) -> dict | None:

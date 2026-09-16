@@ -3,16 +3,27 @@
 Dry-run tool: compare DB subscription expiry vs 3X-UI actual expiry.
 
 Reads active subscriptions from DB, fetches client list from each 3X-UI
-panel, and reports mismatches. US2/us2-ws are never touched.
+panel, and reports mismatches. US2/us2-ws are NEVER touched.
+
+WS servers are excluded because they store no expiry in the 3X-UI panel:
+their expiry lives only in the DB and the standalone xray-ws config.
+Reconciling WS clients requires ws_manager, not this script.
 
 Usage:
-    python scripts/reconcile_expiry.py [--apply UUID] [--server SERVER_ID]
+    python scripts/reconcile_expiry.py [--server SERVER_ID]
+    python scripts/reconcile_expiry.py --apply UUID --server SERVER_ID
 
 Options:
-    --apply UUID      Apply fix for a single client (only after dry-run review)
-    --server SERVER   Limit report to one server ID
+    --apply UUID      Apply expiry fix for a single client.
+                      Requires --server (UUID is not unique across servers).
+    --server SERVER   Limit report to one server ID. Required with --apply.
 
 Exit codes: 0 = no mismatches, 1 = mismatches found, 2 = error
+
+Safety rules enforced in --apply mode:
+  1. UUID must be unambiguous (either one server has it, or --server is given).
+  2. DB state is re-read immediately before writing to the panel.
+  3. Panel expiry is NEVER shrunk: fix is skipped if panel already >= DB end_date.
 """
 
 import argparse
@@ -37,7 +48,9 @@ def _load_servers():
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     path = os.path.join(here, "servers.json")
     with open(path) as f:
-        return json.load(f)
+        data = json.load(f)
+    # servers.json may be {"servers": [...]} or a bare list
+    return data.get("servers", data) if isinstance(data, dict) else data
 
 
 def _fetch_inbound_clients(server: dict) -> list[dict] | None:
@@ -45,18 +58,18 @@ def _fetch_inbound_clients(server: dict) -> list[dict] | None:
     Fetch client list from 3X-UI panel for the given server dict.
     Returns list of client dicts (with 'id', 'email', 'expiryTime', 'enable')
     or None on error.
+
+    Returns None for WS transport: WS servers don't store expiry in the panel.
+    Expiry for WS clients lives in the standalone xray-ws config (ws_manager).
     """
-    import sys
-    import os
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from xui_api import XUIAPI
+    import requests
 
     transport = server.get("transport", "tcp")
     if transport == "ws":
-        return None  # WS servers don't store expiry in panel
+        return None
 
     xui = XUIAPI.__new__(XUIAPI)
-    import requests
     xui.session = requests.Session()
     protocol = "https" if server.get("xui_ssl", True) else "http"
     xui.base_url = f"{protocol}://{server['xui_host']}:{server['xui_port']}{server['xui_web_path']}"
@@ -100,6 +113,19 @@ async def _load_db_subscriptions(db_path: str) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+async def _reread_db_end_date(db_path: str, vless_uuid: str) -> str | None:
+    """Re-read the current end_date for a UUID from DB immediately before applying."""
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("""
+            SELECT end_date FROM subscriptions
+            WHERE vless_uuid = ? AND is_active = 1
+            ORDER BY end_date DESC LIMIT 1
+        """, (vless_uuid,))
+        row = await cur.fetchone()
+        return row["end_date"] if row else None
+
+
 def _end_date_to_ms(end_date_str: str) -> int:
     """Convert ISO datetime string (no tz) to UTC milliseconds."""
     dt = datetime.fromisoformat(end_date_str)
@@ -116,21 +142,29 @@ def _ms_to_str(ms: int) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--apply", metavar="UUID",
-                        help="Apply expiry fix for this UUID (dry-run is the default)")
+                        help="Apply expiry fix for this UUID (dry-run is the default). Requires --server.")
     parser.add_argument("--server", metavar="SERVER_ID",
-                        help="Limit to a specific server ID")
+                        help="Limit report to a specific server ID. Required with --apply.")
     args = parser.parse_args()
+
+    if args.apply and not args.server:
+        print("[ERROR] --apply requires --server (UUID is not unique across servers).",
+              file=sys.stderr)
+        sys.exit(2)
 
     servers = _load_servers()
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     db_path = os.path.join(here, "vpn_bot.db")
 
     db_subs = asyncio.run(_load_db_subscriptions(db_path))
-    db_by_uuid = {s["vless_uuid"]: s for s in db_subs}
 
+    # Records where DB end_date > panel expiry (panel needs updating — safe to apply)
     mismatches = []
+    # Records where panel expiry > DB end_date (informational — never apply)
+    panel_ahead = []
     missing_in_panel = []
 
     target_servers = [
@@ -145,66 +179,78 @@ def main():
         print(f"\n── Server: {srv['id']} ({srv.get('name', '')}) ──")
         clients = _fetch_inbound_clients(srv)
         if clients is None:
-            print("  [SKIP] could not fetch clients")
+            print("  [SKIP] could not fetch clients (WS server or auth error)")
             continue
         print(f"  {len(clients)} clients in panel")
 
         panel_by_uuid = {c["id"]: c for c in clients}
 
-        # Check each DB subscription against panel
         for sub in db_subs:
-            if sub["server_id"] != srv["id"] and sub.get("vless_uuid") not in panel_by_uuid:
-                continue  # different primary server, skip if not in this panel
-            if sub["vless_uuid"] not in panel_by_uuid:
+            uuid = sub["vless_uuid"]
+            if uuid not in panel_by_uuid:
                 if sub["server_id"] == srv["id"]:
                     missing_in_panel.append({
                         "server": srv["id"],
-                        "uuid": sub["vless_uuid"],
+                        "uuid": uuid,
                         "email": sub.get("xui_email", ""),
                         "db_end": sub["end_date"],
                         "plan": sub["plan"],
                     })
                 continue
 
-            panel_client = panel_by_uuid[sub["vless_uuid"]]
+            panel_client = panel_by_uuid[uuid]
             panel_expiry_ms = panel_client.get("expiryTime", 0)
             db_expiry_ms = _end_date_to_ms(sub["end_date"])
 
-            diff_s = abs(panel_expiry_ms - db_expiry_ms) / 1000
-            if diff_s > TOLERANCE_SECONDS:
-                mismatches.append({
-                    "server": srv["id"],
-                    "uuid": sub["vless_uuid"],
-                    "email": sub.get("xui_email", ""),
-                    "plan": sub["plan"],
-                    "db_end_date": sub["end_date"],
-                    "db_expiry_ms": db_expiry_ms,
-                    "panel_expiry_ms": panel_expiry_ms,
-                    "diff_days": (db_expiry_ms - panel_expiry_ms) / 86400000,
-                    "inbound_id": srv["inbound_id"],
-                    "sub_id": sub.get("xui_sub_id", ""),
-                    "flow": srv.get("flow", ""),
-                    "srv": srv,
-                })
+            diff_ms = db_expiry_ms - panel_expiry_ms
+            if abs(diff_ms) <= TOLERANCE_SECONDS * 1000:
+                continue  # within tolerance
+
+            entry = {
+                "server": srv["id"],
+                "uuid": uuid,
+                "email": sub.get("xui_email", ""),
+                "plan": sub["plan"],
+                "db_end_date": sub["end_date"],
+                "db_expiry_ms": db_expiry_ms,
+                "panel_expiry_ms": panel_expiry_ms,
+                "diff_days": diff_ms / 86_400_000,
+                "inbound_id": srv["inbound_id"],
+                "sub_id": sub.get("xui_sub_id", ""),
+                "flow": srv.get("flow", ""),
+                "srv": srv,
+            }
+            if diff_ms > 0:
+                mismatches.append(entry)   # DB ahead → panel needs update
+            else:
+                panel_ahead.append(entry)  # panel ahead → informational only
 
     print("\n" + "=" * 60)
     print(f"SUMMARY — {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
     print("=" * 60)
-    print(f"Servers checked : {len(target_servers)}")
-    print(f"DB active subs  : {len(db_subs)}")
-    print(f"Expiry mismatches: {len(mismatches)}")
-    print(f"Missing in panel : {len(missing_in_panel)}")
+    print(f"Servers checked    : {len(target_servers)}")
+    print(f"DB active subs     : {len(db_subs)}")
+    print(f"Panel behind DB    : {len(mismatches)}  ← can --apply")
+    print(f"Panel ahead of DB  : {len(panel_ahead)}  ← informational, never apply")
+    print(f"Missing in panel   : {len(missing_in_panel)}")
 
     if mismatches:
-        print("\n── Expiry mismatches ──")
+        print("\n── Panel behind DB (expiry too early) ──")
         for m in mismatches:
             db_str = _ms_to_str(m["db_expiry_ms"])
             pan_str = _ms_to_str(m["panel_expiry_ms"])
-            diff = m["diff_days"]
-            sign = "+" if diff > 0 else ""
             print(f"  [{m['server']}] {m['email']} | "
                   f"DB: {db_str} | Panel: {pan_str} | "
-                  f"Δ {sign}{diff:.1f}d | plan={m['plan']}")
+                  f"Δ +{m['diff_days']:.1f}d | plan={m['plan']}")
+
+    if panel_ahead:
+        print("\n── Panel ahead of DB (do NOT apply — would shrink) ──")
+        for m in panel_ahead:
+            db_str = _ms_to_str(m["db_expiry_ms"])
+            pan_str = _ms_to_str(m["panel_expiry_ms"])
+            print(f"  [{m['server']}] {m['email']} | "
+                  f"DB: {db_str} | Panel: {pan_str} | "
+                  f"Δ {m['diff_days']:.1f}d | plan={m['plan']}")
 
     if missing_in_panel:
         print("\n── Missing in panel (primary server) ──")
@@ -214,16 +260,46 @@ def main():
     # Apply mode
     if args.apply:
         uuid = args.apply
-        target = next((m for m in mismatches if m["uuid"] == uuid), None)
-        if not target:
-            print(f"\n[ERROR] UUID {uuid} not found in mismatches list.", file=sys.stderr)
+        # Find all mismatches for this UUID (should be exactly one if --server was given)
+        targets = [m for m in mismatches if m["uuid"] == uuid]
+        if not targets:
+            print(f"\n[ERROR] UUID {uuid} not found in mismatches for server={args.server}. "
+                  "Run without --apply first to see the mismatch list.", file=sys.stderr)
             sys.exit(2)
+        if len(targets) > 1:
+            servers_list = [t["server"] for t in targets]
+            print(f"\n[ERROR] UUID {uuid} appears in mismatches on multiple servers: {servers_list}. "
+                  "Specify --server to disambiguate.", file=sys.stderr)
+            sys.exit(2)
+
+        target = targets[0]
         srv = target["srv"]
         print(f"\n── Applying fix for {uuid} on {srv['id']} ──")
+        print(f"  DB end_date  : {target['db_end_date']} ({_ms_to_str(target['db_expiry_ms'])})")
+        print(f"  Panel expiry : {_ms_to_str(target['panel_expiry_ms'])}")
+        print(f"  Delta        : +{target['diff_days']:.1f} days")
+
+        # Re-read DB end_date immediately before writing (state may have changed since scan)
+        current_end_date = asyncio.run(_reread_db_end_date(db_path, uuid))
+        if not current_end_date:
+            print("[ERROR] Sub no longer active in DB — refusing to apply.", file=sys.stderr)
+            sys.exit(2)
+        current_db_ms = _end_date_to_ms(current_end_date)
+        if current_db_ms != target["db_expiry_ms"]:
+            print(f"[INFO] DB end_date changed since scan: was {target['db_end_date']}, "
+                  f"now {current_end_date}. Using current value.")
+            target["db_expiry_ms"] = current_db_ms
+
+        # Never shrink: if panel is already at or past DB date, skip
+        if target["panel_expiry_ms"] >= target["db_expiry_ms"]:
+            print("[SKIP] Panel expiry is already >= DB end_date. Nothing to do.")
+            sys.exit(0)
+
         answer = input("Confirm (yes/no): ").strip().lower()
         if answer != "yes":
             print("Cancelled.")
             sys.exit(0)
+
         from xui_api import XUIAPI
         import requests
         xui = XUIAPI.__new__(XUIAPI)
@@ -234,6 +310,7 @@ def main():
         if not xui.login(srv["xui_username"], srv["xui_password"]):
             print("[ERROR] auth failed", file=sys.stderr)
             sys.exit(2)
+
         ok = xui.update_client(
             target["inbound_id"], uuid, target["email"],
             sub_id=target["sub_id"],
