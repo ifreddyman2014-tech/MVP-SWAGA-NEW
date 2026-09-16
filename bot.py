@@ -2019,6 +2019,9 @@ def _delete_client_from_all_servers(uuid: str, inbound_id_fallback: int) -> None
         return
 
     for server in servers:
+        if server.id in _PROTECTED_SERVER_IDS:
+            logger.debug("expire-delete: skipping protected server %s (uuid=%s)", server.id, uuid)
+            continue
         try:
             ok = _server_delete_client(server, uuid)
             if ok:
