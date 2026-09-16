@@ -35,7 +35,7 @@ _WHSEC_DB_PATH = _WHSEC_DB.name
 
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
