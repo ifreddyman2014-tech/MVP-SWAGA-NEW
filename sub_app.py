@@ -823,52 +823,126 @@ def set_payment_callback(callback):
 
 @routes.post("/webhook/yookassa")
 async def handle_yookassa_webhook(request: web.Request) -> web.Response:
-    """Обработка webhook от YooKassa."""
+    """
+    Handle YooKassa webhook notification.
+
+    Trust model:
+      - Webhook body is an UNTRUSTED transport trigger.
+      - Only payment_id is extracted from the body.
+      - Entitlement fields (user_id, plan, server, amount) come exclusively
+        from the local DB order that was written when the user initiated payment.
+      - Payment final status, paid flag, amount, and currency are verified via
+        an authoritative YooKassa API call (Payment.find_one).
+      - Any verification failure is fail-closed: no fulfillment, no mutation.
+      - Temporary API errors return 500 to allow YooKassa webhook retry.
+    """
     try:
         body = await request.text()
-        logger.info("YooKassa webhook received: %s", body[:500])
+        logger.info("YooKassa webhook received: %s", body[:200])
 
-        from yookassa_payment import parse_webhook
+        from yookassa_payment import parse_webhook, fetch_authoritative_payment
         from database import get_payment, update_payment_status
 
+        # 1. Minimal parse — extract notification identifiers only
         data = parse_webhook(body)
         if not data:
-            logger.error("Failed to parse webhook")
+            logger.error("Webhook: failed to parse notification body")
             return web.Response(status=400, text="Invalid webhook")
 
         payment_id = data["payment_id"]
-        event = data["event"]
         status = data["status"]
 
-        logger.info(
-            "Webhook: event=%s, payment_id=%s, status=%s, user=%s",
-            event, payment_id, status, data.get("user_id")
-        )
+        logger.info("Webhook: payment_id=%s status=%s", payment_id, status)
 
-        # Проверяем, что платёж существует в нашей БД
-        payment = await get_payment(payment_id)
-        if not payment:
-            logger.warning("Payment not found in DB: %s", payment_id)
+        # 2. Find local trusted order in DB
+        local_payment = await get_payment(payment_id)
+        if not local_payment:
+            logger.warning("Webhook: unknown payment_id=%s — no local order", payment_id)
             return web.Response(status=200, text="OK")
 
         if status == "succeeded":
+            # 3. Authoritative verification — fail-closed on any API error
+            try:
+                auth = fetch_authoritative_payment(payment_id)
+            except Exception as e:
+                logger.error(
+                    "Webhook: authoritative lookup raised for payment_id=%s: %s",
+                    payment_id, type(e).__name__,
+                )
+                return web.Response(status=500, text="Verification error")
+
+            if auth is None:
+                logger.error(
+                    "Webhook: authoritative lookup returned None for payment_id=%s",
+                    payment_id,
+                )
+                return web.Response(status=500, text="Verification error")
+
+            # 4. Validate every security condition against the authoritative response
+            from decimal import Decimal
+
+            if auth.get("id") != payment_id:
+                logger.warning(
+                    "Webhook: payment_id mismatch webhook=%s api=%s",
+                    payment_id, auth.get("id"),
+                )
+                return web.Response(status=200, text="OK")
+
+            if auth.get("status") != "succeeded":
+                logger.warning(
+                    "Webhook: authoritative status=%s for payment_id=%s",
+                    auth.get("status"), payment_id,
+                )
+                return web.Response(status=200, text="OK")
+
+            if not auth.get("paid"):
+                logger.warning(
+                    "Webhook: authoritative paid=False for payment_id=%s", payment_id
+                )
+                return web.Response(status=200, text="OK")
+
+            if auth.get("amount_currency") != "RUB":
+                logger.warning(
+                    "Webhook: unexpected currency=%s for payment_id=%s",
+                    auth.get("amount_currency"), payment_id,
+                )
+                return web.Response(status=200, text="OK")
+
+            try:
+                auth_dec = Decimal(str(auth["amount_value"])).quantize(
+                    Decimal("0.01"))
+                local_dec = Decimal(str(local_payment["amount"])).quantize(
+                    Decimal("0.01"))
+            except Exception as e:
+                logger.error(
+                    "Webhook: amount parse error for payment_id=%s: %s",
+                    payment_id, type(e).__name__,
+                )
+                return web.Response(status=200, text="OK")
+
+            if auth_dec != local_dec:
+                logger.warning(
+                    "Webhook: amount mismatch for payment_id=%s auth=%s local=%s",
+                    payment_id, auth_dec, local_dec,
+                )
+                return web.Response(status=200, text="OK")
+
+            # 5. All checks passed — entitlement from LOCAL DB, not webhook body
             from datetime import datetime
             paid_at = datetime.utcnow().isoformat()
 
-            # Idempotency and crash recovery are handled atomically inside the callback
-            # via begin_fulfillment (BEGIN IMMEDIATE). Always invoke the callback so that
-            # both first-time processing and sync-pending recovery are handled uniformly.
-            if _payment_success_callback:
-                await _payment_success_callback(
-                    payment_id=payment_id,
-                    user_id=data["user_id"],
-                    plan_key=data["plan_key"],
-                    server_id=data["server_id"],
-                    amount=data["amount"],
-                    paid_at=paid_at,
-                )
-            else:
-                logger.warning("Payment success callback not set!")
+            if not _payment_success_callback:
+                logger.error("Webhook: payment success callback not set — returning 503 for retry")
+                return web.Response(status=503, text="Service unavailable")
+
+            await _payment_success_callback(
+                payment_id=payment_id,
+                user_id=local_payment["user_id"],    # LOCAL DB
+                plan_key=local_payment["plan_key"],  # LOCAL DB
+                server_id=local_payment["server_id"],# LOCAL DB
+                amount=local_payment["amount"],       # LOCAL DB
+                paid_at=paid_at,
+            )
 
         elif status == "canceled":
             await update_payment_status(payment_id, "canceled")
@@ -876,7 +950,7 @@ async def handle_yookassa_webhook(request: web.Request) -> web.Response:
         return web.Response(status=200, text="OK")
 
     except Exception as e:
-        logger.error("Error processing webhook: %s", e)
+        logger.error("Error processing webhook: %s", type(e).__name__)
         return web.Response(status=500, text="Internal error")
 
 

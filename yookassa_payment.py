@@ -130,6 +130,31 @@ def parse_webhook(request_body: str) -> Optional[dict]:
         return None
 
 
+def fetch_authoritative_payment(payment_id: str) -> Optional[dict]:
+    """
+    Fetch authoritative payment state from YooKassa API.
+
+    Returns a minimal trusted dict or None on any error.
+    Callers must treat None as fail-closed (no fulfillment).
+    Never logs secrets, tokens, or full response bodies.
+    """
+    try:
+        payment = Payment.find_one(payment_id)
+        return {
+            "id": payment.id,
+            "status": payment.status,
+            "paid": bool(payment.paid),
+            "amount_value": str(payment.amount.value),
+            "amount_currency": payment.amount.currency,
+        }
+    except Exception as e:
+        logger.error(
+            "YooKassa authoritative lookup failed payment_id=%s: %s",
+            payment_id, type(e).__name__,
+        )
+        return None
+
+
 def get_payment_info(payment_id: str) -> Optional[dict]:
     """
     Получить полную информацию о платеже.
