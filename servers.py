@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 # Путь к файлу конфигурации серверов
 SERVERS_CONFIG_PATH = os.getenv("SERVERS_CONFIG_PATH", "./servers.json")
 
+# Servers that must never receive automatic health or failover network requests.
+# These are protected reserve nodes; they may only be reached by explicit
+# operator action, never by background loops or schedulers.
+PROTECTED_SERVER_IDS: frozenset[str] = frozenset({"us2", "us2-ws"})
+
 
 @dataclass
 class VPNServer:
@@ -208,6 +213,10 @@ class ServerManager:
 
     async def check_server_health(self, server: VPNServer) -> bool:
         """Проверить доступность сервера."""
+        if server.id in PROTECTED_SERVER_IDS:
+            logger.debug("Health check skipped for protected server %s", server.id)
+            return True
+
         web_path = server.xui_web_path.rstrip("/")
         scheme = "https" if server.xui_ssl else "http"
         base = f"{scheme}://{server.xui_host}:{server.xui_port}{web_path}"
@@ -259,12 +268,16 @@ class ServerManager:
             return False
 
     async def check_all_servers(self) -> dict[str, bool]:
-        """Проверить все серверы."""
+        """Проверить все серверы (кроме защищённых резервных)."""
         results = {}
-        tasks = [self.check_server_health(s) for s in self.servers.values()]
+        servers_to_check = [
+            s for s in self.servers.values()
+            if s.id not in PROTECTED_SERVER_IDS
+        ]
+        tasks = [self.check_server_health(s) for s in servers_to_check]
         health_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for server, health in zip(self.servers.values(), health_results):
+        for server, health in zip(servers_to_check, health_results):
             if isinstance(health, Exception):
                 results[server.id] = False
             else:
