@@ -58,8 +58,10 @@ class VPNServer:
     reality_spx: str = "/"          # SpiderX path
 
     # WS transport SSH-управление (для серверов с standalone xray-ws)
-    ws_ssh_password: str = ""        # SSH root password для редактирования xray-ws config
+    ws_ssh_password: str = ""        # SSH root password для редактирования xray-ws config (legacy)
     ws_config_path: str = ""         # Путь к /etc/xray-ws/config.json на сервере
+    ws_host: str = ""                # Физический хост xray-ws (отдельно от xui_host = management tunnel)
+    ws_ssh_key: str = ""             # Путь к ed25519 automation key для ws_manager (key-auth path)
 
     # Внутренняя пометка (не влияет на логику)
     clone_of: str = ""               # ID физического сервера-источника (если это клон)

@@ -1892,11 +1892,13 @@ def _server_add_client(
     """Add VPN client — WS servers via SSH, xui servers via API."""
     if getattr(server, "transport", "") == "ws":
         import ws_manager
+        ws_host = getattr(server, "ws_host", "") or server.xui_host
         return ws_manager.add_client(
-            server.xui_host,
+            ws_host,
             getattr(server, "ws_ssh_password", ""),
             getattr(server, "ws_config_path", ""),
             uuid, email,
+            ssh_key=getattr(server, "ws_ssh_key", ""),
         )
     from xui_api import XUIAPI
     srv_xui = XUIAPI()
@@ -1915,11 +1917,13 @@ def _server_delete_client(server, uuid: str) -> bool:
     """Delete VPN client — WS servers via SSH, xui servers via API."""
     if getattr(server, "transport", "") == "ws":
         import ws_manager
+        ws_host = getattr(server, "ws_host", "") or server.xui_host
         return ws_manager.delete_client(
-            server.xui_host,
+            ws_host,
             getattr(server, "ws_ssh_password", ""),
             getattr(server, "ws_config_path", ""),
             uuid,
+            ssh_key=getattr(server, "ws_ssh_key", ""),
         )
     from xui_api import XUIAPI
     srv_xui = XUIAPI()
@@ -1955,11 +1959,13 @@ def _server_sync_client(
         return False
     if getattr(server, "transport", "") == "ws":
         import ws_manager
+        ws_host = getattr(server, "ws_host", "") or server.xui_host
         return ws_manager.add_client(
-            server.xui_host,
+            ws_host,
             getattr(server, "ws_ssh_password", ""),
             getattr(server, "ws_config_path", ""),
             uuid, email,
+            ssh_key=getattr(server, "ws_ssh_key", ""),
         )
     from xui_api import XUIAPI
     srv_xui = XUIAPI()
