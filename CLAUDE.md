@@ -464,6 +464,46 @@ done
 
 ## 📝 CHANGELOG
 
+### 17.09.2026 — Изоляция тестов от продакшн БД (fix/test-db-isolation, коммит 941d7d4)
+
+**tests/test_payment_logic.py:**
+- Исправлен баг import-order: `db.DB_PATH = _TEMP_DB.name` явно выставляется ПОСЛЕ
+  `import database as db`, чтобы перезаписать кэшированный путь к продакшн-БД.
+  Ранее `_config.DB_PATH = temp` не обновляло `database.DB_PATH`, если модуль уже
+  был в `sys.modules` (собран раньше другим тест-файлом — в алфавитном порядке).
+  Результат: все 18 тестов молча писали в продакшн БД.
+- Добавлена `_assert_db_isolation()`: tripwire перед первой записью в `setUpClass`.
+  Поднимает `RuntimeError` если `database.DB_PATH` = продакшн, или `config.DB_PATH`
+  = продакшн, или два пути расходятся (split-brain).
+- Добавлены константы `_PRODUCTION_DB_PATH` и комментарий о причине порядка импортов.
+
+**tests/test_fulfillment_sync_reliability.py:**
+- Та же fix-паттерн: `_db.DB_PATH = _TEMP_DB_PATH` после `import database as _db`.
+- Все `aiosqlite.connect(_TEMP_DB_PATH)` в хелперах заменены на `aiosqlite.connect(_db.DB_PATH)`,
+  чтобы хелперы всегда работали с той же БД, что и `_db.create_user / create_subscription`.
+
+**tests/test_payment_db_isolation.py (НОВЫЙ ФАЙЛ):**
+- Регрессионный тест: импортирует `database` на уровне модуля (алфавит: 'd' < 'p'),
+  гарантируя, что `database` окажется в `sys.modules` ДО сбора `test_payment_logic.py`.
+- test_01: `database.DB_PATH != production` (FAIL без фикса, PASS после).
+- test_02: `database.DB_PATH == config.DB_PATH` (split-brain = FAIL).
+- test_03: `_assert_db_isolation` существует и бросает `RuntimeError` при split-brain.
+- test_04: tripwire бросает при `database.DB_PATH == production`.
+
+**Состояние тестов:** 63/63 passed (было 59 до добавления 4 новых тестов).
+
+**Инцидент — повторное загрязнение продакшн БД (17.09.2026 10:39 UTC):**
+- При демонстрации RED-состояния (запуск тестов ДО фикса) `test_payment_logic.py`
+  записал данные в продакшн (db.DB_PATH указывал на vpn_bot.db).
+- Добавлено: +10 подписок (дубли для uid 100001-110015), +8 платежей (pay_dup_001,
+  pay_concurrent_001, pay_bf_*, pay_accum_a/b).
+- Итого synthetic данных в продакшн: users=10, subs=19, payments=8.
+- Удаление НЕ выполнялось (см. правило "DO NOT cleanup synthetic users").
+- Фикс исключает повторение: tripwire остановит тесты при следующей попытке.
+
+**Ветка:** `fix/test-db-isolation`, от `dashboard-v1` (41c31b4)
+**Продакшн не перезапускался. Бизнес-логика не изменялась.**
+
 ### 16.09.2026 — Атомарное начисление доступа + тесты + подготовка к выпуску
 
 #### ⚠️ ВЛИЯНИЕ НА US2 — ТРЕБУЕТ ОТДЕЛЬНОГО СОГЛАСОВАНИЯ
