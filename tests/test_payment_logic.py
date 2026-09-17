@@ -37,14 +37,42 @@ from unittest.mock import MagicMock
 # Ensure project root is on sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Patch DB_PATH before importing database module so tests use a temp file
+# Patch DB_PATH before importing database module so tests use a temp file.
+# IMPORTANT: import database first (it may already be cached in sys.modules
+# from another test file collected earlier), then override DB_PATH on the
+# module object directly.  Setting only config.DB_PATH is not enough when the
+# module is cached — the cached binding still holds the production path.
 import config as _config
 
 _TEMP_DB = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _TEMP_DB.close()
-_config.DB_PATH = _TEMP_DB.name
 
 import database as db
+
+_config.DB_PATH = _TEMP_DB.name
+db.DB_PATH = _TEMP_DB.name  # override cached binding regardless of import order
+
+_PRODUCTION_DB_PATH = os.path.realpath(
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "vpn_bot.db")
+)
+
+
+def _assert_db_isolation() -> None:
+    """Tripwire: raises RuntimeError if DB paths are unsafe before any write."""
+    test_path = os.path.realpath(db.DB_PATH)
+    cfg_path = os.path.realpath(_config.DB_PATH)
+    if test_path == _PRODUCTION_DB_PATH:
+        raise RuntimeError(
+            f"Refusing to run: database.DB_PATH resolves to production ({test_path!r})"
+        )
+    if cfg_path == _PRODUCTION_DB_PATH:
+        raise RuntimeError(
+            f"Refusing to run: config.DB_PATH resolves to production ({cfg_path!r})"
+        )
+    if test_path != cfg_path:
+        raise RuntimeError(
+            f"Split-brain: database.DB_PATH ({test_path!r}) != config.DB_PATH ({cfg_path!r})"
+        )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -112,6 +140,7 @@ class TestPaymentLogic(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        _assert_db_isolation()
         run(_init())
 
     # 1. First payment after trial → plan updated

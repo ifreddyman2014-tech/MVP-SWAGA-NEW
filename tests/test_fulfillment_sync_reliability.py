@@ -67,6 +67,7 @@ _config.DB_PATH = _TEMP_DB_PATH
 import database as _db
 import bot as _bot
 
+_db.DB_PATH = _TEMP_DB_PATH  # override cached binding regardless of import order
 _config.DB_PATH = _original_db_path  # restore for other test modules
 
 from servers import ServerManager, VPNServer
@@ -104,7 +105,7 @@ def _make_mgr(server_id: str = "fr1", transport: str = "tcp") -> ServerManager:
 
 
 async def _get_fulfillment_status(payment_id: str) -> str | None:
-    async with aiosqlite.connect(_TEMP_DB_PATH) as conn:
+    async with aiosqlite.connect(_db.DB_PATH) as conn:
         async with conn.execute(
             "SELECT fulfillment_status FROM payments WHERE payment_id = ?",
             (payment_id,),
@@ -114,7 +115,7 @@ async def _get_fulfillment_status(payment_id: str) -> str | None:
 
 
 async def _get_sub_end_date(user_id: int) -> str | None:
-    async with aiosqlite.connect(_TEMP_DB_PATH) as conn:
+    async with aiosqlite.connect(_db.DB_PATH) as conn:
         async with conn.execute(
             "SELECT end_date FROM subscriptions WHERE user_id=? AND is_active=1",
             (user_id,),
@@ -135,7 +136,7 @@ async def _setup_renewal(uid: int, payment_id: str, server_id: str = "fr1") -> s
         vless_uuid=uuid, xui_sub_id=f"sub-{uid}",
         server_id=server_id, xui_email=f"tg_{uid}",
     )
-    async with aiosqlite.connect(_TEMP_DB_PATH) as conn:
+    async with aiosqlite.connect(_db.DB_PATH) as conn:
         await conn.execute(
             "INSERT INTO payments "
             "(payment_id, user_id, amount, plan_key, status, created_at) "
@@ -148,7 +149,7 @@ async def _setup_renewal(uid: int, payment_id: str, server_id: str = "fr1") -> s
 
 async def _create_pending_payment(uid: int, payment_id: str) -> None:
     now = datetime.utcnow()
-    async with aiosqlite.connect(_TEMP_DB_PATH) as conn:
+    async with aiosqlite.connect(_db.DB_PATH) as conn:
         await conn.execute(
             "INSERT INTO payments "
             "(payment_id, user_id, amount, plan_key, status, created_at) "
@@ -325,7 +326,7 @@ class TestFulfillmentSyncReliability(unittest.TestCase):
         run(_setup_renewal(uid, pid, server_id="fr1"))
 
         async def _pre_fulfill():
-            async with aiosqlite.connect(_TEMP_DB_PATH) as conn:
+            async with aiosqlite.connect(_db.DB_PATH) as conn:
                 await conn.execute(
                     "UPDATE payments "
                     "SET status='succeeded', fulfillment_status='fulfilled' "
