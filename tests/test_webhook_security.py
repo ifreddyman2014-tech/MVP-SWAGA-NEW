@@ -639,5 +639,226 @@ class TestWebhookSecurity(unittest.TestCase):
             "No fulfillment must occur when callback is missing")
 
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # P0-C — Secured payment.canceled webhook path (tests 12–17)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # RED #12 — Forged canceled: authoritative says succeeded → no cancel
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def test_12_forged_canceled_auth_says_succeeded_no_mutation(self):
+        """
+        Attacker sends payment.canceled for a payment authoritative API calls
+        succeeded. Local payment is pending.
+
+        DESIRED: no cancellation mutation; status stays 'pending'.
+
+        RED: current handler cancels unconditionally — no auth call for 'canceled'.
+        """
+        USER_A = 301120
+        PID = "pay_wsec_012"
+
+        _db_create_user(USER_A)
+        _db_create_payment(PID, USER_A, 130.0, "1m")  # pending
+
+        parse_mock = _parse_webhook_mock(PID, "canceled", 130.0,
+                                          USER_A, "1m", "fr1")
+        auth_mock = _auth_payment_mock(PID, status="succeeded", paid=True,
+                                        amount_value="130.00", currency="RUB")
+
+        with mock.patch("yookassa_payment.parse_webhook", parse_mock):
+            with mock.patch("yookassa_payment.fetch_authoritative_payment",
+                            auth_mock):
+                self._call_handler()
+
+        pmt = _db_get_payment(PID)
+        self.assertNotEqual(
+            pmt["status"], "canceled",
+            f"VULNERABILITY CONFIRMED: payment downgraded to 'canceled' despite "
+            f"authoritative status='succeeded'. Attacker forged cancel webhook. "
+            f"Current status: {pmt['status']}",
+        )
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # RED #13 — Canceled cannot downgrade an already-succeeded local payment
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def test_13_canceled_cannot_downgrade_succeeded_local_payment(self):
+        """
+        Local payment is already 'succeeded'. Canceled webhook arrives
+        (auth confirms canceled — attacker replays a delayed cancel notification).
+
+        DESIRED: refuse to downgrade; status stays 'succeeded'. User keeps VPN access.
+
+        RED: current handler overwrites any status unconditionally.
+        """
+        USER_A = 301130
+        PID = "pay_wsec_013"
+
+        _db_create_user(USER_A)
+        _db_create_payment(PID, USER_A, 130.0, "1m", status="succeeded")
+
+        parse_mock = _parse_webhook_mock(PID, "canceled", 130.0,
+                                          USER_A, "1m", "fr1")
+        auth_mock = _auth_payment_mock(PID, status="canceled", paid=False,
+                                        amount_value="130.00", currency="RUB")
+
+        with mock.patch("yookassa_payment.parse_webhook", parse_mock):
+            with mock.patch("yookassa_payment.fetch_authoritative_payment",
+                            auth_mock):
+                self._call_handler()
+
+        pmt = _db_get_payment(PID)
+        self.assertEqual(
+            pmt["status"], "succeeded",
+            f"VULNERABILITY CONFIRMED: succeeded payment downgraded to 'canceled'. "
+            f"User lost VPN access. Status is now: {pmt['status']}",
+        )
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # RED #14 — Auth API exception on canceled webhook: fail-closed
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def test_14_auth_api_exception_on_canceled_fail_closed(self):
+        """
+        Canceled webhook received. YooKassa authoritative API raises (timeout).
+
+        DESIRED: fail-closed — return 500 so YooKassa retries; no status mutation.
+
+        RED: current handler has no auth call for 'canceled' — cancels unconditionally.
+        """
+        USER_A = 301140
+        PID = "pay_wsec_014"
+
+        _db_create_user(USER_A)
+        _db_create_payment(PID, USER_A, 130.0, "1m")
+
+        parse_mock = _parse_webhook_mock(PID, "canceled", 130.0,
+                                          USER_A, "1m", "fr1")
+
+        def _raising_auth(pid: str):
+            raise TimeoutError("YooKassa API timeout")
+
+        with mock.patch("yookassa_payment.parse_webhook", parse_mock):
+            with mock.patch("yookassa_payment.fetch_authoritative_payment",
+                            _raising_auth):
+                resp = self._call_handler()
+
+        pmt = _db_get_payment(PID)
+        self.assertEqual(
+            pmt["status"], "pending",
+            f"VULNERABILITY CONFIRMED: payment canceled despite auth API timeout. "
+            f"Status is: {pmt['status']}",
+        )
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # RED #15 — Auth API returns None on canceled webhook: fail-closed
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def test_15_auth_api_none_on_canceled_fail_closed(self):
+        """
+        Canceled webhook received. YooKassa authoritative API returns None (unreachable).
+
+        DESIRED: fail-closed — return 500; no status mutation.
+
+        RED: current handler has no auth call for 'canceled' — cancels unconditionally.
+        """
+        USER_A = 301150
+        PID = "pay_wsec_015"
+
+        _db_create_user(USER_A)
+        _db_create_payment(PID, USER_A, 130.0, "1m")
+
+        parse_mock = _parse_webhook_mock(PID, "canceled", 130.0,
+                                          USER_A, "1m", "fr1")
+
+        def _none_auth(pid: str):
+            return None
+
+        with mock.patch("yookassa_payment.parse_webhook", parse_mock):
+            with mock.patch("yookassa_payment.fetch_authoritative_payment",
+                            _none_auth):
+                resp = self._call_handler()
+
+        pmt = _db_get_payment(PID)
+        self.assertEqual(
+            pmt["status"], "pending",
+            f"VULNERABILITY CONFIRMED: payment canceled despite auth API returning None. "
+            f"Status is: {pmt['status']}",
+        )
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # RED #16 — Auth payment_id mismatch on canceled: skip silently, no mutation
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def test_16_auth_id_mismatch_on_canceled_no_mutation(self):
+        """
+        Canceled webhook. Authoritative response contains a different payment_id.
+
+        DESIRED: skip silently (200); no status mutation.
+
+        RED: current handler cancels without any id verification.
+        """
+        USER_A = 301160
+        PID = "pay_wsec_016"
+
+        _db_create_user(USER_A)
+        _db_create_payment(PID, USER_A, 130.0, "1m")
+
+        parse_mock = _parse_webhook_mock(PID, "canceled", 130.0,
+                                          USER_A, "1m", "fr1")
+        # auth returns a DIFFERENT payment_id — id mismatch
+        auth_mock = _auth_payment_mock("pay_DIFFERENT_999", status="canceled")
+
+        with mock.patch("yookassa_payment.parse_webhook", parse_mock):
+            with mock.patch("yookassa_payment.fetch_authoritative_payment",
+                            auth_mock):
+                self._call_handler()
+
+        pmt = _db_get_payment(PID)
+        self.assertEqual(
+            pmt["status"], "pending",
+            f"VULNERABILITY CONFIRMED: payment canceled despite payment_id mismatch "
+            f"in authoritative response. Status is: {pmt['status']}",
+        )
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # GREEN #17 — Legitimate canceled: pending → canceled (happy path regression)
+    # ──────────────────────────────────────────────────────────────────────────
+
+    @unittest.skipUnless(_fix_applied(), "Requires P0-C canceled path auth verification fix")
+    def test_17_legitimate_canceled_pending_to_canceled(self):
+        """
+        Legitimate canceled webhook. Local order is 'pending'.
+        Authoritative confirms 'canceled'.
+
+        DESIRED: status set to 'canceled', HTTP 200.
+        """
+        USER_A = 301170
+        PID = "pay_wsec_017"
+
+        _db_create_user(USER_A)
+        _db_create_payment(PID, USER_A, 130.0, "1m")  # pending
+
+        parse_mock = _parse_webhook_mock(PID, "canceled", 130.0,
+                                          USER_A, "1m", "fr1")
+        auth_mock = _auth_payment_mock(PID, status="canceled", paid=False,
+                                        amount_value="130.00", currency="RUB")
+
+        with mock.patch("yookassa_payment.parse_webhook", parse_mock):
+            with mock.patch("yookassa_payment.fetch_authoritative_payment",
+                            auth_mock):
+                resp = self._call_handler()
+
+        self.assertEqual(resp.status, 200, "Legitimate canceled must return HTTP 200")
+        pmt = _db_get_payment(PID)
+        self.assertEqual(
+            pmt["status"], "canceled",
+            f"Legitimate canceled payment must be set to 'canceled', "
+            f"got: {pmt['status']}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -945,6 +945,45 @@ async def handle_yookassa_webhook(request: web.Request) -> web.Response:
             )
 
         elif status == "canceled":
+            # Authoritative verification — same fail-closed pattern as succeeded path
+            try:
+                auth = fetch_authoritative_payment(payment_id)
+            except Exception as e:
+                logger.error(
+                    "Webhook: canceled: authoritative lookup raised for payment_id=%s: %s",
+                    payment_id, type(e).__name__,
+                )
+                return web.Response(status=500, text="Verification error")
+
+            if auth is None:
+                logger.error(
+                    "Webhook: canceled: authoritative lookup returned None for payment_id=%s",
+                    payment_id,
+                )
+                return web.Response(status=500, text="Verification error")
+
+            if auth.get("id") != payment_id:
+                logger.warning(
+                    "Webhook: canceled: payment_id mismatch webhook=%s api=%s",
+                    payment_id, auth.get("id"),
+                )
+                return web.Response(status=200, text="OK")
+
+            if auth.get("status") != "canceled":
+                logger.warning(
+                    "Webhook: canceled: authoritative status=%s for payment_id=%s, not canceled",
+                    auth.get("status"), payment_id,
+                )
+                return web.Response(status=200, text="OK")
+
+            # Refuse to downgrade an already-succeeded payment
+            if local_payment.get("status") == "succeeded":
+                logger.warning(
+                    "Webhook: canceled: refusing to downgrade succeeded payment_id=%s",
+                    payment_id,
+                )
+                return web.Response(status=200, text="OK")
+
             await update_payment_status(payment_id, "canceled")
 
         return web.Response(status=200, text="OK")
