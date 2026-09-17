@@ -50,7 +50,7 @@ import database as db
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
 
 
 async def _init():
@@ -73,7 +73,7 @@ async def _create_user_and_sub(user_id: int, plan: str, end_days_from_now: int =
 async def _create_payment(payment_id: str, user_id: int, plan_key: str,
                            status: str = "pending"):
     import aiosqlite
-    async with aiosqlite.connect(_config.DB_PATH) as conn:
+    async with aiosqlite.connect(db.DB_PATH) as conn:
         await conn.execute("""
             INSERT OR IGNORE INTO payments
               (payment_id, user_id, amount, plan_key, status, created_at)
@@ -88,7 +88,7 @@ async def _create_succeeded_payment(payment_id: str, user_id: int, plan_key: str
     """Create a succeeded payment, optionally with target_end_date and fulfillment_status."""
     import aiosqlite
     now = datetime.utcnow().isoformat()
-    async with aiosqlite.connect(_config.DB_PATH) as conn:
+    async with aiosqlite.connect(db.DB_PATH) as conn:
         await conn.execute("""
             INSERT OR IGNORE INTO payments
               (payment_id, user_id, amount, plan_key, status, created_at, paid_at,

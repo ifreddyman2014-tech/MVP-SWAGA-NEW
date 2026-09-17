@@ -1947,6 +1947,12 @@ def _server_sync_client(
                  при ответе «not found» — addClient. Это исключает Duplicate email
                  при продлениях, сохраняя создание при первичной регистрации.
     """
+    if getattr(server, "id", None) in _PROTECTED_SERVER_IDS:
+        logger.warning(
+            "_server_sync_client: refused contact with protected server %s",
+            getattr(server, "id", "?"),
+        )
+        return False
     if getattr(server, "transport", "") == "ws":
         import ws_manager
         return ws_manager.add_client(
@@ -2952,31 +2958,31 @@ async def handle_payment_success(
         email = sub_info["email"]
         end = datetime.fromisoformat(sub_info["end_date"])
         new_expiry_ms = sub_info["expiry_ms"]
+        primary_sync_ok = False
         if actual_server_id and actual_server_id != "default":
             server = server_manager.get_server(actual_server_id)
             vpn_host = server.host if server else VPN_HOST
             vpn_port = server.vpn_port if server else VPN_PORT
-            # Обновляем на внешнем сервере
             if server:
-                # WS серверы не хранят expiry в конфиге — срок действия контролируется только БД
-                if getattr(server, "transport", "") != "ws":
+                if actual_server_id not in _PROTECTED_SERVER_IDS:
+                    # WS servers don't store expiry in the panel — DB is the source of truth,
+                    # so no panel call is needed; treat as sync success.
+                    # XUI servers: use _server_sync_client (idempotent, returns bool).
                     try:
-                        from xui_api import XUIAPI
-                        server_xui = XUIAPI()
-                        protocol = "https" if getattr(server, "xui_ssl", True) else "http"
-                        server_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
-                        login_resp_ok = server_xui.login(server.xui_username, server.xui_password)
-                        login_resp = type("_R", (), {"json": lambda self, **kw: {"success": login_resp_ok}})()
-                        if login_resp.json().get("success"):
-                            server_xui._logged_in = True
-                            server_xui.update_client(
-                                server.inbound_id, new_uuid, email,
-                                sub_id=sub_id, expiry_time=new_expiry_ms,
-                                flow=server.flow
-                            )
+                        primary_sync_ok = _server_sync_client(
+                            server, new_uuid, email,
+                            sub_id=sub_id, expiry_ms=new_expiry_ms, flow=server.flow,
+                        )
                     except Exception as e:
                         logger.warning("Не удалось обновить expiry в панели: %s", e)
-                # Обновляем expiry на всех остальных включённых серверах
+                        primary_sync_ok = False
+                else:
+                    logger.warning(
+                        "Renewal sync skipped: primary server %s is protected; "
+                        "payment %s will remain pending for operator review",
+                        actual_server_id, payment_id,
+                    )
+                # Обновляем expiry на всех остальных включённых серверах (best-effort)
                 other_servers = [s for s in server_manager.get_all_servers() if s.enabled]
                 if len(other_servers) > 1:
                     loop = asyncio.get_event_loop()
@@ -2985,6 +2991,7 @@ async def handle_payment_success(
                         new_uuid, email, sub_id, new_expiry_ms, actual_server_id, other_servers,
                         True,  # is_renewal
                     )
+            # If server is None (config removed): primary_sync_ok stays False so startup sync retries
         else:
             server = None
             vpn_host = VPN_HOST
@@ -2992,11 +2999,18 @@ async def handle_payment_success(
             # Обновляем на дефолтном сервере
             try:
                 xui.update_client(INBOUND_ID, new_uuid, email, sub_id=sub_id, expiry_time=new_expiry_ms)
+                primary_sync_ok = True
             except Exception as e:
                 logger.warning("Не удалось обновить expiry в панели: %s", e)
 
-        if payment_id:
-            await mark_payment_fulfilled(payment_id)
+        if primary_sync_ok:
+            if payment_id:
+                await mark_payment_fulfilled(payment_id)
+        else:
+            if payment_id:
+                logger.warning(
+                    "Renewal sync failed for payment %s; startup sync will retry", payment_id
+                )
         is_extension = True
         logger.info("Extending subscription for user %s to %s", user_id, end)
 
