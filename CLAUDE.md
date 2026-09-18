@@ -464,6 +464,58 @@ done
 
 ## 📝 CHANGELOG
 
+### 18.09.2026 — H0 Protected Server Containment
+
+**servers.py:**
+- `get_best_server()`: добавлен фильтр `s.id not in PROTECTED_SERVER_IDS` в основной пул и fallback-пул. До фикса us2 (priority=10, 0% load) выигрывал сортировку и назначался новым пользователям.
+
+**bot.py:**
+- Удалён локальный дубликат `_PROTECTED_SERVER_IDS = {"us2", "us2-ws"}` (был на строке 95).
+- Добавлен `from servers import PROTECTED_SERVER_IDS` — единственный источник истины.
+- `_server_add_client()`: добавлен guard в самом начале функции — `if server.id in PROTECTED_SERVER_IDS: return False`. Предотвращает любые обращения к XUIAPI или ws_manager для защищённых серверов.
+- Все 5 упоминаний `_PROTECTED_SERVER_IDS` переименованы в `PROTECTED_SERVER_IDS`.
+
+**sub_app.py:**
+- Добавлен `PROTECTED_SERVER_IDS` в импорт из servers.
+- `handle_subscription (/sub/)` и `handle_connect (/connect/)`: оба фильтра `enabled_servers` дополнены условием `s.id not in PROTECTED_SERVER_IDS`. Защищённые серверы больше не включаются в конфиги, выдаваемые пользователям.
+
+**tests/test_protected_server_policy.py (НОВЫЙ ФАЙЛ):**
+- 16 TDD-тестов (RED → GREEN): selection (A-D), provision guard (E-H), output filter (I-K), policy regression (L-O).
+- Итого suite: 91/91 тестов.
+
+**Деплой:** commit 391fd09, vpnbot restarted 1 раз в 16:15Z. DB до/после: 102 активных подписки, без изменений.
+
+### 18.09.2026 — NGINX/PERIMETER HARDENING (Run D) — INFRA FREEZE
+
+**nginx.conf:**
+- `server_tokens off` — версия nginx скрыта из заголовков ответов.
+- `ssl_protocols TLSv1.2 TLSv1.3` — убраны TLSv1.0, TLSv1.1 (были включены; fr.swaga-vpn.ru уже использовал TLS 1.2+).
+
+**sites-enabled/swaga-vpn.conf, sites-available/tono-business.conf:**
+- `X-Content-Type-Options: nosniff` и `Referrer-Policy: no-referrer-when-downgrade` добавлены в web-блоки (swaga-vpn.ru, business.swaga-vpn.ru). Не добавлены в WS/subscription блоки.
+
+**Backups:** `/etc/nginx/*.pre_rund_20260918T070427Z`, `/root/nginx_full_config_pre_rund_20260918T070427Z.txt` (600).
+
+**Перimeter:** Port 2096 (x-ui admin) — защищён nftables SWAGA_XUI2096_V4 на FR/US1/UK1. Изменений firewall не потребовалось.
+
+**Reload:** `systemctl reload nginx` в 20260918T070706Z. `nginx -t` PASS. nginx active.
+
+**SWAGA INFRA FREEZE активен с 18.09.2026.** Дальнейшие инфра-изменения только при: инциденте, эксплуатируемой уязвимости, проблеме с надёжностью, масштабировании, новом продуктовом требовании.
+
+### 18.09.2026 — FR SSH Hardening (Run C.2)
+
+**Проблема:** FR допускал password authentication. UK1/US1 уже hardened в Run C (17.09.2026).
+
+**/etc/ssh/sshd_config.d/10-swaga-hardening.conf (НОВЫЙ ФАЙЛ):**
+- `10-` prefix — takes priority before `60-cloudimg-settings.conf` (PasswordAuthentication yes).
+- Эффективно: PasswordAuthentication no, KbdInteractiveAuthentication no, PubkeyAuthentication yes, PermitRootLogin prohibit-password.
+- systemctl reload ssh (НЕ restart). Текущая сессия сохранена.
+- Password auth rejection verified (BatchMode=yes, PreferredAuthentications=password → Permission denied (publickey)).
+- Backup: /etc/ssh/sshd_config.pre_swaga_hardening_20260918T064902Z, /etc/ssh/sshd_config.d/60-cloudimg-settings.conf.pre_swaga_hardening_20260918T064902Z.
+
+**Operator pre-hardening evidence:** FR_KEY_OK verified from Windows workstation before hardening.
+**Post-hardening external check:** FR_KEY_OK_AFTER VERIFIED — confirmed from Windows workstation 18.09.2026.
+
 ### 17.09.2026 — WS_MANAGER HOST-IDENTITY FIX (fix/ws-manager-host-identity, коммит 1600ae7)
 
 **Проблема:** После XUI tunnel cutover (xui_host=127.0.0.1 для UK1/US1) ws_manager._is_local()
