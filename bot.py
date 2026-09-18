@@ -69,6 +69,7 @@ from xui_api import XUIAPI
 # from yookassa_payment import create_payment as yookassa_create_payment  # Временно отключено
 from backup import backup_now
 from utils import generate_uuid, generate_sub_id, format_date, build_vless_link
+from servers import PROTECTED_SERVER_IDS
 from sub_app import start_sub_server, stop_sub_server, set_payment_callback
 from keyboards import (
     main_menu_kb,
@@ -90,9 +91,6 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.HTML)
 dp = Dispatcher(bot)
 xui = XUIAPI()
-
-# Servers that must never be touched by automatic sync (protected reserve).
-_PROTECTED_SERVER_IDS = {"us2", "us2-ws"}
 
 
 # ── Уведомления админам ──────────────────────────────────────────────────────
@@ -1890,6 +1888,9 @@ def _server_add_client(
     flow: str = "",
 ) -> bool:
     """Add VPN client — WS servers via SSH, xui servers via API."""
+    if getattr(server, "id", None) in PROTECTED_SERVER_IDS:
+        logger.debug("_server_add_client: skipping protected server %s", getattr(server, "id", "?"))
+        return False
     if getattr(server, "transport", "") == "ws":
         import ws_manager
         ws_host = getattr(server, "ws_host", "") or server.xui_host
@@ -1951,7 +1952,7 @@ def _server_sync_client(
                  при ответе «not found» — addClient. Это исключает Duplicate email
                  при продлениях, сохраняя создание при первичной регистрации.
     """
-    if getattr(server, "id", None) in _PROTECTED_SERVER_IDS:
+    if getattr(server, "id", None) in PROTECTED_SERVER_IDS:
         logger.warning(
             "_server_sync_client: refused contact with protected server %s",
             getattr(server, "id", "?"),
@@ -1995,7 +1996,7 @@ def _sync_client_to_other_servers(
     for server in enabled_servers:
         if server.id == primary_server_id:
             continue
-        if server.id in _PROTECTED_SERVER_IDS:
+        if server.id in PROTECTED_SERVER_IDS:
             logger.warning("sync: protected server %s excluded from sync target (uuid=%s)", server.id, uuid)
             continue
         try:
@@ -2031,7 +2032,7 @@ def _delete_client_from_all_servers(uuid: str, inbound_id_fallback: int) -> None
         return
 
     for server in servers:
-        if server.id in _PROTECTED_SERVER_IDS:
+        if server.id in PROTECTED_SERVER_IDS:
             logger.debug("expire-delete: skipping protected server %s (uuid=%s)", server.id, uuid)
             continue
         try:
@@ -2970,7 +2971,7 @@ async def handle_payment_success(
             vpn_host = server.host if server else VPN_HOST
             vpn_port = server.vpn_port if server else VPN_PORT
             if server:
-                if actual_server_id not in _PROTECTED_SERVER_IDS:
+                if actual_server_id not in PROTECTED_SERVER_IDS:
                     # WS servers don't store expiry in the panel — DB is the source of truth,
                     # so no panel call is needed; treat as sync success.
                     # XUI servers: use _server_sync_client (idempotent, returns bool).
@@ -3321,7 +3322,7 @@ async def _startup_sync_pending_fulfillments() -> None:
         )
         try:
             if srv_id and srv_id != "default":
-                if srv_id in _PROTECTED_SERVER_IDS:
+                if srv_id in PROTECTED_SERVER_IDS:
                     logger.warning(
                         "STARTUP SYNC: payment %s — primary server %s is protected, "
                         "skipping sync (subscription remains valid in DB)",

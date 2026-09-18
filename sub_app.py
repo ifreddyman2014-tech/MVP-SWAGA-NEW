@@ -52,7 +52,7 @@ from config import (
 )
 from database import get_sub_by_xui_id
 from utils import build_vless_link, format_date
-from servers import server_manager
+from servers import server_manager, PROTECTED_SERVER_IDS
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,10 @@ async def handle_subscription(request: web.Request) -> web.Response:
         server_manager.load_config()
 
     # Получаем все включенные серверы
-    enabled_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+    enabled_servers = [
+        s for s in server_manager.get_all_servers()
+        if s.enabled and s.id not in PROTECTED_SERVER_IDS
+    ]
 
     if not enabled_servers:
         # Fallback на дефолтный сервер если нет включенных
@@ -692,8 +695,11 @@ async def handle_connect(request: web.Request) -> web.Response:
     if not server_manager.servers:
         server_manager.load_config()
 
-    # Получаем все включенные серверы
-    enabled_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+    # Получаем все включенные не-защищённые серверы
+    enabled_servers = [
+        s for s in server_manager.get_all_servers()
+        if s.enabled and s.id not in PROTECTED_SERVER_IDS
+    ]
 
     # Формируем список VLESS ссылок для отображения
     vless_links = []

@@ -188,15 +188,20 @@ class ServerManager:
         """
         Выбрать лучший сервер для нового пользователя.
         Критерии: enabled, healthy, не перегружен, приоритет.
+        Protected reserve servers (PROTECTED_SERVER_IDS) are never eligible.
         """
         available = [
             s for s in self.servers.values()
             if s.enabled and s.is_healthy and s.current_users < s.max_users
+            and s.id not in PROTECTED_SERVER_IDS
         ]
 
         if not available:
-            # Fallback: любой включённый сервер
-            available = [s for s in self.servers.values() if s.enabled]
+            # Fallback: любой включённый не-защищённый сервер
+            available = [
+                s for s in self.servers.values()
+                if s.enabled and s.id not in PROTECTED_SERVER_IDS
+            ]
 
         if not available:
             return None
