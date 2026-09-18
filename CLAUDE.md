@@ -464,6 +464,65 @@ done
 
 ## 📝 CHANGELOG
 
+### 17.09.2026 — WS_MANAGER HOST-IDENTITY FIX (fix/ws-manager-host-identity, коммит 1600ae7)
+
+**Проблема:** После XUI tunnel cutover (xui_host=127.0.0.1 для UK1/US1) ws_manager._is_local()
+маршрутизировал все WS файловые операции на локальный FR filesystem вместо физического удалённого хоста.
+Поле xui_host выполняло двойную роль: endpoint управления XUI и физический хост для ws_manager SSH.
+
+**ws_manager.py:**
+- Добавлена константа `KNOWN_HOSTS_PATH = "/root/.ssh/swaga_ws_manager_known_hosts"` — выделенный known_hosts для ключей автоматизации.
+- Добавлена `_ssh_key(host, key_path, command, input_data, timeout)` — SSH через ed25519 ключ:
+  StrictHostKeyChecking=yes, BatchMode=yes, UserKnownHostsFile=dedicated, без sshpass.
+  Передаёт stdin для команды записи (base64 pipe).
+- `_read_config`, `_write_config`, `_reload` — добавлен параметр `ssh_key=""`:
+  если задан → key-auth path, иначе → legacy sshpass (backward compat).
+- Команда записи через key-auth: `base64 -d > {path}` через stdin вместо inline python3.
+  Совместима с forced-command wrapper.
+- `add_client`, `delete_client` — добавлены параметры `ssh_key=""` и `fail_closed=False`.
+  `fail_closed=True`: remote host без ключа → return False, без fallback на sshpass.
+  Legacy path (no key, no fail_closed) сохранён для dormant записей (us2-ws).
+
+**servers.py:**
+- Добавлены поля `ws_host: str = ""` и `ws_ssh_key: str = ""` в VPNServer.
+  `ws_host` = физический хост xray-ws (отдельно от xui_host = management tunnel endpoint).
+
+**bot.py:**
+- `_server_add_client`, `_server_delete_client`, `_server_sync_client`:
+  ws_host = `server.ws_host or server.xui_host` — передаётся в ws_manager вместо xui_host.
+  ssh_key = `server.ws_ssh_key` — передаётся напрямую.
+
+**servers.json (не git-tracked):**
+- fr1-ws: добавлены `ws_host=127.0.0.1`, `ws_ssh_key=""` (локальный, без ключа).
+- us1-ws: добавлены `ws_host=80.76.49.140`, `ws_ssh_key=/root/.ssh/swaga_us1_ws_manager_ed25519`.
+- uk1: добавлены `ws_host=163.5.210.147`, `ws_ssh_key=/root/.ssh/swaga_uk1_ws_manager_ed25519`.
+- us2-ws: НЕ ТРОНУТ (защищённый сервер).
+
+**tests/test_ws_manager_host_identity.py (НОВЫЙ ФАЙЛ, 12 тестов):**
+- TEST 1–4: routing корректно использует ws_host, не xui_host.
+- TEST 5: legacy compatibility (sshpass path для старых записей).
+- TEST 6: key-auth команда содержит -i, BatchMode=yes, StrictHostKeyChecking=yes, dedicated known_hosts.
+- TEST 7–9: US1/UK1 операции не трогают FR filesystem и наоборот.
+- TEST 10: fail_closed=True без ключа → False, без fallback на sshpass.
+- TEST 11: nonzero SSH exit → False.
+- TEST 12: legacy entry без новых полей → sshpass path.
+
+**Инфраструктура (FR/US1/UK1):**
+- Ключи: `/root/.ssh/swaga_us1_ws_manager_ed25519`, `/root/.ssh/swaga_uk1_ws_manager_ed25519` (ed25519, 600).
+- Fingerprints: US1=SHA256:ABAAzPt1AZa8Ai8845MgMxXHg+oclLuHbgFZhAk9blA, UK1=SHA256:rQLz9GhCTPlmS6cVDSdLyvwzXb0oLdg0GCdqmOEh4jU.
+- Wrapper: `/usr/local/sbin/swaga-ws-manager-remote` (root:root 700) на US1 и UK1.
+  Разрешает ровно: cat config, base64-d write, systemctl restart xray-ws. Остальное — denied.
+- authorized_keys: restricted entry (no-agent-forwarding, no-port-forwarding, no-X11-forwarding, no-pty, no-user-rc, command=wrapper) добавлен на US1 и UK1.
+  Backup: `authorized_keys.pre_ws_manager_20260917` на обоих хостах.
+- Known_hosts: `/root/.ssh/swaga_ws_manager_known_hosts` (600), 6 записей (ED25519/RSA/ECDSA × 2 хоста).
+
+**Результаты проверки:**
+- 75/75 тестов PASS (12 новых + 63 baseline).
+- Controlled routing verification: fr1-ws→FR only ✓, us1-ws→US1 only ✓, uk1→UK1 only ✓.
+- Хэши FR/US1/UK1 после теста = хэшам до теста (cleanup чистый).
+- vpnbot NRestarts=1 (один перезапуск для деплоя).
+- DB: active=101, paid=31, pending_fulfillment=0 (без мутаций).
+
 ### 17.09.2026 — Изоляция тестов от продакшн БД (fix/test-db-isolation, коммит 941d7d4)
 
 **tests/test_payment_logic.py:**
