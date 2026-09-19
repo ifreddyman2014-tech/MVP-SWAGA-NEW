@@ -464,6 +464,53 @@ done
 
 ## 📝 CHANGELOG
 
+### 19.09.2026 — H1-F1 Read-First XUI Provisioning (Standard Panels)
+
+**Root causes fixed:**
+- RC-1: `_NOT_FOUND_MARKERS` в `add_or_update_client` не включал "empty client ID" →
+  sync на FR/US1/US1-xhttp молча падал для новых UUID (updateClient возвращал ошибку,
+  fallback на addClient не срабатывал).
+- RC-2: UK1 3X-UI форк возвращает HTTP 404 на `updateClient` даже для существующих UUID →
+  несовместимый маршрут; UK1/UK1-xhttp теперь помечены `xui_standard: false` и пропускаются.
+
+**xui_api.py:**
+- Добавлен `EnsureResult(Enum)`: CREATED, UPDATED, ALREADY_OK, CONFLICT, FAILED.
+- Добавлен `get_inbound_clients(inbound_id)`: читает список клиентов из панели.
+  Возвращает `list | None`. None ≠ пустой список: None = панель недоступна или несовместима.
+  Возвращает None если settings — dict (UK1-формат), чтобы не допустить запись.
+- Добавлен `ensure_client(...)`: read-first идемпотентное начисление.
+  1. Читает список → FAILED если None. 2. UUID найден → updateClient → UPDATED/FAILED.
+  3. UUID не найден, email занят другим UUID → CONFLICT. 4. Оба отсутствуют → addClient → CREATED/FAILED.
+  Не использует error-string parsing. Не допускает слепой addClient при сетевом сбое.
+
+**servers.py:**
+- Добавлено поле `xui_standard: bool = True` в VPNServer.
+  False для панелей с несовместимым API (UK1 форк).
+
+**bot.py (`_server_sync_client`):**
+- Убран вызов `add_or_update_client`. Заменён на `ensure_client`.
+- Добавлен guard `if not getattr(server, "xui_standard", True): return False`
+  после WS-ветки — для UK1/UK1-xhttp sync деферится без IO.
+- Возвращает True для CREATED/UPDATED/ALREADY_OK, False для CONFLICT/FAILED.
+
+**servers.json (untracked):**
+- `uk1` и `uk1-xhttp`: добавлен `"xui_standard": false`.
+- `us2`, `us2-ws`: НЕ ТРОНУТЫ (H0 защита).
+
+**tests/test_xui_ensure_client.py (новый файл, 30 тестов):**
+- GROUP 1: get_inbound_clients — 6 тестов (happy path, пустой список, HTTP error, dict-settings, success=false, ID not found).
+- GROUP 2: ensure_client — 8 тестов (CREATED, UPDATED, CONFLICT, FAILED×3, incident payload, ALREADY_OK).
+- GROUP 3: EnsureResult enum существует и является Enum.
+- GROUP 4: xui_standard поле в VPNServer и servers.json (uk1/uk1-xhttp false, fr1/us1 true).
+- GROUP 5: _server_sync_client routing (xui_standard=False, us2, us2-ws, CREATED/UPDATED/CONFLICT/FAILED).
+- GROUP 6: H0 инварианты сохранены после H1-F1.
+
+**tests/test_fulfillment_sync_reliability.py:**
+- `_xui_mock`: добавлен `ensure_client.return_value` (EnsureResult.UPDATED/FAILED по `aou_returns`).
+  Необходимо так как _server_sync_client теперь вызывает ensure_client, а не add_or_update_client.
+
+**Деплой:** commit 396233d, vpnbot restarted 07:03Z. 121/121 тестов. Worktree: /tmp/swaga-h1f1-ensure-client-20260919.
+
 ### 18.09.2026 — H0 Protected Server Containment
 
 **servers.py:**
