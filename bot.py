@@ -70,6 +70,19 @@ from xui_api import XUIAPI
 from backup import backup_now
 from utils import generate_uuid, generate_sub_id, format_date, build_vless_link
 from servers import PROTECTED_SERVER_IDS
+
+# Per-inbound panel email alias scheme.
+# Panels that share inbounds require a unique email per inbound for the same logical UUID.
+# Only the target-inbound email differs; the UUID and user-facing config are unchanged.
+PANEL_EMAIL_SUFFIXES: dict[str, str] = {
+    "us1-xhttp": "_i3",
+}
+
+
+def panel_email(server_id: str, base_email: str) -> str:
+    """Derive the panel-side email for a given server and logical/base email."""
+    suffix = PANEL_EMAIL_SUFFIXES.get(server_id, "")
+    return f"{base_email}{suffix}" if suffix and base_email else base_email
 from sub_app import start_sub_server, stop_sub_server, set_payment_callback
 from keyboards import (
     main_menu_kb,
@@ -1979,9 +1992,12 @@ def _server_sync_client(
     if not srv_xui.login(server.xui_username, server.xui_password):
         logger.warning("_server_sync_client: auth failed on %s", server.name)
         return False
+    derived = panel_email(server.id, email)
+    extra = [email] if derived != email else None
     result = srv_xui.ensure_client(
-        server.inbound_id, uuid, email,
+        server.inbound_id, uuid, derived,
         sub_id=sub_id, expiry_time=expiry_ms, flow=flow,
+        extra_conflict_emails=extra,
     )
     return result in (EnsureResult.CREATED, EnsureResult.UPDATED, EnsureResult.ALREADY_OK)
 

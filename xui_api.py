@@ -325,15 +325,20 @@ class XUIAPI:
         sub_id: str = "",
         expiry_time: int = 0,
         flow: str = "",
+        extra_conflict_emails: "list[str] | None" = None,
     ) -> "EnsureResult":
         """
         Read-first idempotent client provisioning.
 
         Steps:
           1. Read current client list — returns FAILED if None (never writes blind).
-          2. UUID found → updateClient → UPDATED / FAILED.
-          3. UUID absent, email taken by a different UUID → CONFLICT (no write).
+          2. UUID found → updateClient using existing panel email (never silently renames).
+          3. UUID absent, email or extra_conflict_emails taken by another UUID → CONFLICT.
           4. Both absent → addClient → CREATED / FAILED.
+
+        extra_conflict_emails: additional emails to treat as conflict signals when UUID
+        is absent (used for per-inbound alias schemes where the base email must also be
+        checked against the target inbound).
         """
         clients = self.get_inbound_clients(inbound_id)
         if clients is None:
@@ -344,18 +349,25 @@ class XUIAPI:
 
         for c in clients:
             if c.get("id") == uuid:
+                # Preserve existing panel email — never silently rename a client.
+                use_email = c.get("email") or email
                 ok = self.update_client(
-                    inbound_id, uuid, email,
+                    inbound_id, uuid, use_email,
                     sub_id=sub_id, expiry_time=expiry_time, flow=flow,
                 )
                 return EnsureResult.UPDATED if ok else EnsureResult.FAILED
 
+        # UUID absent: check for email conflicts.
+        conflict_set = {email}
+        if extra_conflict_emails:
+            conflict_set.update(extra_conflict_emails)
+
         for c in clients:
-            if c.get("email") == email:
+            if c.get("email") in conflict_set:
                 logger.warning(
                     "ensure_client: email %s exists with different UUID %s "
                     "(target UUID: %s) — CONFLICT",
-                    email, c.get("id"), uuid,
+                    c.get("email"), c.get("id"), uuid,
                 )
                 return EnsureResult.CONFLICT
 
