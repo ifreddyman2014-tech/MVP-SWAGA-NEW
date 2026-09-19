@@ -63,6 +63,9 @@ class VPNServer:
     ws_host: str = ""                # Физический хост xray-ws (отдельно от xui_host = management tunnel)
     ws_ssh_key: str = ""             # Путь к ed25519 automation key для ws_manager (key-auth path)
 
+    # XUI panel compatibility
+    xui_standard: bool = True        # False for panels with non-standard API (e.g. UK1 fork)
+
     # Внутренняя пометка (не влияет на логику)
     clone_of: str = ""               # ID физического сервера-источника (если это клон)
 

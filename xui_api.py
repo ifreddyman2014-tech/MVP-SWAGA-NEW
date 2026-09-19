@@ -5,6 +5,8 @@
 
 import json
 import logging
+from enum import Enum
+
 import urllib3
 
 import requests
@@ -19,6 +21,14 @@ logger = logging.getLogger(__name__)
 # Подстроки в msg ответа, означающие «клиент с таким UUID не найден».
 # Используются в add_or_update_client для fallback на addClient.
 _NOT_FOUND_MARKERS = ("record not found", "not found", "no client")
+
+
+class EnsureResult(Enum):
+    CREATED = "created"
+    UPDATED = "updated"
+    ALREADY_OK = "already_ok"
+    CONFLICT = "conflict"
+    FAILED = "failed"
 
 
 def _parse_api_response(resp: requests.Response) -> dict:
@@ -252,3 +262,105 @@ class XUIAPI:
         except Exception as e:
             logger.error("3X-UI: ошибка при удалении клиента — %s", e)
             return False
+
+    # ── Read-first provisioning ───────────────────────────────────────────────
+
+    def get_inbound_clients(self, inbound_id: int):
+        """
+        Read the client list for an inbound from the panel.
+        Returns list[dict] on success, or None on any failure.
+        CRITICAL: None != []. None means the panel state could not be read;
+        empty list means the inbound exists but has zero clients.
+        Returns None for UK1-style panels where settings is a dict (not JSON string).
+        """
+        self._ensure_login()
+        url = self._url("panel/api/inbounds/list")
+        try:
+            resp = self.session.get(url, verify=False, timeout=10)
+            data = _parse_api_response(resp)
+        except Exception as e:
+            logger.error("3X-UI: ошибка чтения inbounds/list — %s", e)
+            return None
+
+        if not data.get("success"):
+            logger.error("3X-UI: get_inbound_clients failed — %s", data.get("msg"))
+            return None
+
+        for inbound in (data.get("obj") or []):
+            if inbound.get("id") != inbound_id:
+                continue
+            settings = inbound.get("settings")
+            if isinstance(settings, dict):
+                # Non-standard panel (e.g. UK1): settings is already a dict.
+                # The write path is also incompatible, so refuse to read as well.
+                logger.warning(
+                    "3X-UI: settings field is dict (non-standard panel), "
+                    "cannot read clients for inbound %s", inbound_id,
+                )
+                return None
+            if not isinstance(settings, str):
+                logger.error(
+                    "3X-UI: unexpected settings type %s for inbound %s",
+                    type(settings), inbound_id,
+                )
+                return None
+            try:
+                parsed = json.loads(settings)
+            except ValueError as e:
+                logger.error(
+                    "3X-UI: cannot parse settings JSON for inbound %s: %s",
+                    inbound_id, e,
+                )
+                return None
+            return parsed.get("clients") or []
+
+        logger.warning("3X-UI: inbound %s not found in panel list", inbound_id)
+        return None
+
+    def ensure_client(
+        self,
+        inbound_id: int,
+        uuid: str,
+        email: str,
+        sub_id: str = "",
+        expiry_time: int = 0,
+        flow: str = "",
+    ) -> "EnsureResult":
+        """
+        Read-first idempotent client provisioning.
+
+        Steps:
+          1. Read current client list — returns FAILED if None (never writes blind).
+          2. UUID found → updateClient → UPDATED / FAILED.
+          3. UUID absent, email taken by a different UUID → CONFLICT (no write).
+          4. Both absent → addClient → CREATED / FAILED.
+        """
+        clients = self.get_inbound_clients(inbound_id)
+        if clients is None:
+            logger.error(
+                "ensure_client: panel state unreadable, refusing write — %s", email,
+            )
+            return EnsureResult.FAILED
+
+        for c in clients:
+            if c.get("id") == uuid:
+                ok = self.update_client(
+                    inbound_id, uuid, email,
+                    sub_id=sub_id, expiry_time=expiry_time, flow=flow,
+                )
+                return EnsureResult.UPDATED if ok else EnsureResult.FAILED
+
+        for c in clients:
+            if c.get("email") == email:
+                logger.warning(
+                    "ensure_client: email %s exists with different UUID %s "
+                    "(target UUID: %s) — CONFLICT",
+                    email, c.get("id"), uuid,
+                )
+                return EnsureResult.CONFLICT
+
+        ok = self.add_client(
+            inbound_id, uuid, email,
+            sub_id=sub_id, expiry_time=expiry_time, flow=flow,
+        )
+        return EnsureResult.CREATED if ok else EnsureResult.FAILED

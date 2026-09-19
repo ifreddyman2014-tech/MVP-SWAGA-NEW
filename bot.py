@@ -1948,9 +1948,8 @@ def _server_sync_client(
     Идемпотентная синхронизация клиента на один сервер.
 
     WS-серверы: ws_manager.add_client уже идемпотентен (проверяет UUID перед добавлением).
-    XUI-серверы: вызываем add_or_update_client — сначала updateClient по UUID,
-                 при ответе «not found» — addClient. Это исключает Duplicate email
-                 при продлениях, сохраняя создание при первичной регистрации.
+    XUI стандартные (xui_standard=True): ensure_client — read-first, state-driven.
+    XUI нестандартные (xui_standard=False, напр. uk1): deferred, возвращает False.
     """
     if getattr(server, "id", None) in PROTECTED_SERVER_IDS:
         logger.warning(
@@ -1968,17 +1967,23 @@ def _server_sync_client(
             uuid, email,
             ssh_key=getattr(server, "ws_ssh_key", ""),
         )
-    from xui_api import XUIAPI
+    if not getattr(server, "xui_standard", True):
+        logger.warning(
+            "_server_sync_client: xui-compatibility deferred for %s", server.name,
+        )
+        return False
+    from xui_api import XUIAPI, EnsureResult
     srv_xui = XUIAPI()
     protocol = "https" if getattr(server, "xui_ssl", True) else "http"
     srv_xui.base_url = f"{protocol}://{server.xui_host}:{server.xui_port}{server.xui_web_path}"
     if not srv_xui.login(server.xui_username, server.xui_password):
         logger.warning("_server_sync_client: auth failed on %s", server.name)
         return False
-    return srv_xui.add_or_update_client(
+    result = srv_xui.ensure_client(
         server.inbound_id, uuid, email,
         sub_id=sub_id, expiry_time=expiry_ms, flow=flow,
     )
+    return result in (EnsureResult.CREATED, EnsureResult.UPDATED, EnsureResult.ALREADY_OK)
 
 
 def _sync_client_to_other_servers(

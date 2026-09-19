@@ -167,9 +167,11 @@ def _xui_mock(login_ok: bool = True,
 
     login_ok      — return value of login() (bool)
     update_raises — if set, update_client() raises this exception
-    aou_returns   — return value of add_or_update_client()
-                    (used by _server_sync_client after the fix)
+    aou_returns   — drives ensure_client() return value:
+                    True  → EnsureResult.UPDATED (sync succeeded)
+                    False → EnsureResult.FAILED  (sync failed)
     """
+    from xui_api import EnsureResult
     instance = mock.MagicMock()
     instance.login.return_value = login_ok
     if update_raises is not None:
@@ -177,6 +179,7 @@ def _xui_mock(login_ok: bool = True,
     else:
         instance.update_client.return_value = mock.MagicMock()
     instance.add_or_update_client.return_value = aou_returns
+    instance.ensure_client.return_value = EnsureResult.UPDATED if aou_returns else EnsureResult.FAILED
     cls = mock.MagicMock(return_value=instance)
     return cls, instance
 
