@@ -1980,11 +1980,6 @@ def _server_sync_client(
             uuid, email,
             ssh_key=getattr(server, "ws_ssh_key", ""),
         )
-    if not getattr(server, "xui_standard", True):
-        logger.warning(
-            "_server_sync_client: xui-compatibility deferred for %s", server.name,
-        )
-        return False
     from xui_api import XUIAPI, EnsureResult
     srv_xui = XUIAPI()
     protocol = "https" if getattr(server, "xui_ssl", True) else "http"
@@ -1992,6 +1987,12 @@ def _server_sync_client(
     if not srv_xui.login(server.xui_username, server.xui_password):
         logger.warning("_server_sync_client: auth failed on %s", server.name)
         return False
+    if not getattr(server, "xui_standard", True):
+        result = srv_xui.ensure_client_uk1(
+            server.inbound_id, uuid, email,
+            sub_id=sub_id, expiry_time=expiry_ms, flow=flow,
+        )
+        return result in (EnsureResult.CREATED, EnsureResult.UPDATED, EnsureResult.ALREADY_OK)
     derived = panel_email(server.id, email)
     extra = [email] if derived != email else None
     result = srv_xui.ensure_client(

@@ -56,7 +56,7 @@ _db.DB_PATH = _TEMP_DB.name
 
 import bot as _bot
 import xui_api as _xui_module
-from xui_api import XUIAPI
+from xui_api import XUIAPI, EnsureResult
 
 from servers import PROTECTED_SERVER_IDS, VPNServer
 
@@ -538,15 +538,15 @@ class TestServerSyncClientRouting(unittest.TestCase):
             flow="",
         )
 
-    def test_40_xui_standard_false_returns_false_no_io(self):
+    def test_40_xui_standard_false_uses_uk1_adapter(self):
         """
-        TEST 40 — UK1 BLOCK (xui_standard=False):
-        xui_standard=False server → _server_sync_client returns False,
-        zero calls to XUIAPI and zero calls to ws_manager.
+        TEST 40 — UK1 ADAPTER (xui_standard=False, non-WS):
+        xui_standard=False non-WS server → _server_sync_client uses ensure_client_uk1.
+        Previously deferred; now routed to the UK1 fork adapter.
         """
         srv = VPNServer(
-            id="uk1",
-            name="UK1",
+            id="uk1-xhttp",
+            name="UK1 xHTTP",
             host="163.5.210.147",
             xui_host="127.0.0.1",
             xui_port=13226,
@@ -554,18 +554,20 @@ class TestServerSyncClientRouting(unittest.TestCase):
             xui_username="admin",
             xui_password="pass",
             xui_ssl=False,
-            transport="tcp",
+            transport="xhttp",
             inbound_id=2,
             xui_standard=False,
         )
 
-        with mock.patch("xui_api.XUIAPI") as mock_xui_cls, \
-             mock.patch("ws_manager.add_client") as mock_ws:
+        with mock.patch("xui_api.XUIAPI") as mock_xui_cls:
+            instance = mock_xui_cls.return_value
+            instance.login.return_value = True
+            instance.ensure_client_uk1.return_value = EnsureResult.CREATED
             result = self._run_sync(srv)
 
-        self.assertFalse(result)
-        mock_xui_cls.assert_not_called()
-        mock_ws.assert_not_called()
+        self.assertTrue(result)
+        instance.ensure_client_uk1.assert_called_once()
+        instance.ensure_client.assert_not_called()
 
     def test_41_us2_protected_returns_false_no_io(self):
         """

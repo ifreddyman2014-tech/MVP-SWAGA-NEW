@@ -265,6 +265,157 @@ class XUIAPI:
 
     # ── Read-first provisioning ───────────────────────────────────────────────
 
+    # ── UK1 fork adapter (non-standard panel) ─────────────────────────────────
+
+    def get_inbound_clients_uk1(self, inbound_id: int):
+        """
+        Read client list for UK1-fork panels where settings is a dict (not JSON string).
+        Returns list[dict] on success, None on any failure.
+        """
+        self._ensure_login()
+        url = self._url("panel/api/inbounds/list")
+        try:
+            resp = self.session.get(url, verify=False, timeout=10)
+            data = _parse_api_response(resp)
+        except Exception as e:
+            logger.error("3X-UI UK1: read inbounds/list error — %s", e)
+            return None
+        if not data.get("success"):
+            logger.error("3X-UI UK1: get_inbound_clients_uk1 failed — %s", data.get("msg"))
+            return None
+        for inbound in (data.get("obj") or []):
+            if inbound.get("id") != inbound_id:
+                continue
+            settings = inbound.get("settings")
+            if not isinstance(settings, dict):
+                logger.error(
+                    "3X-UI UK1: expected dict settings for inbound %s, got %s",
+                    inbound_id, type(settings),
+                )
+                return None
+            return settings.get("clients") or []
+        logger.warning("3X-UI UK1: inbound %s not found", inbound_id)
+        return None
+
+    def _uk1_client_payload(
+        self,
+        uuid: str,
+        email: str,
+        sub_id: str,
+        expiry_time: int,
+        flow: str,
+    ) -> dict:
+        return {
+            "id": uuid,
+            "uuid": uuid,
+            "email": email,
+            "enable": True,
+            "expiryTime": expiry_time,
+            "flow": flow,
+            "limitIp": 3,
+            "totalGB": 0,
+            "subId": sub_id,
+            "tgId": 0,
+            "reset": 0,
+        }
+
+    def _uk1_add_client(
+        self,
+        inbound_id: int,
+        uuid: str,
+        email: str,
+        sub_id: str,
+        expiry_time: int,
+        flow: str,
+    ) -> bool:
+        self._ensure_login()
+        url = self._url("panel/api/clients/add")
+        payload = {
+            "client": self._uk1_client_payload(uuid, email, sub_id, expiry_time, flow),
+            "inboundIds": [inbound_id],
+        }
+        try:
+            resp = self.session.post(url, json=payload, verify=False, timeout=10)
+            data = _parse_api_response(resp)
+            if data.get("success"):
+                logger.info("3X-UI UK1: client added — %s", email)
+                return True
+            logger.error("3X-UI UK1: add error — %s", data)
+            return False
+        except Exception as e:
+            logger.error("3X-UI UK1: add exception — %s", e)
+            return False
+
+    def _uk1_update_client(
+        self,
+        uuid: str,
+        email: str,
+        sub_id: str,
+        expiry_time: int,
+        flow: str,
+    ) -> bool:
+        import urllib.parse as _urlparse
+        self._ensure_login()
+        url = self._url(f"panel/api/clients/update/{_urlparse.quote(email, safe='')}")
+        payload = self._uk1_client_payload(uuid, email, sub_id, expiry_time, flow)
+        try:
+            resp = self.session.post(url, json=payload, verify=False, timeout=10)
+            data = _parse_api_response(resp)
+            if data.get("success"):
+                logger.info("3X-UI UK1: client updated — %s expiry=%s", email, expiry_time)
+                return True
+            logger.error("3X-UI UK1: update error — %s", data)
+            return False
+        except Exception as e:
+            logger.error("3X-UI UK1: update exception — %s", e)
+            return False
+
+    def ensure_client_uk1(
+        self,
+        inbound_id: int,
+        uuid: str,
+        email: str,
+        sub_id: str = "",
+        expiry_time: int = 0,
+        flow: str = "",
+    ) -> "EnsureResult":
+        """
+        Read-first idempotent provisioning for UK1-fork panels.
+
+        Routes differ from standard 3X-UI:
+          CREATE: POST /panel/api/clients/add  {client: {id, uuid, email, ...}, inboundIds}
+          UPDATE: POST /panel/api/clients/update/{email}  (email-keyed, not UUID-keyed)
+
+        Panel honors the UUID passed in both 'id' and 'uuid' fields.
+        On UUID found: preserves existing panel email (never silently renames).
+        """
+        clients = self.get_inbound_clients_uk1(inbound_id)
+        if clients is None:
+            logger.error(
+                "ensure_client_uk1: panel state unreadable, refusing write — %s", email,
+            )
+            return EnsureResult.FAILED
+
+        for c in clients:
+            if c.get("id") == uuid:
+                use_email = c.get("email") or email
+                ok = self._uk1_update_client(uuid, use_email, sub_id, expiry_time, flow)
+                return EnsureResult.UPDATED if ok else EnsureResult.FAILED
+
+        for c in clients:
+            if c.get("email") == email:
+                logger.warning(
+                    "ensure_client_uk1: email %s exists with different UUID — CONFLICT "
+                    "(target UUID: %s)",
+                    email, uuid,
+                )
+                return EnsureResult.CONFLICT
+
+        ok = self._uk1_add_client(inbound_id, uuid, email, sub_id, expiry_time, flow)
+        return EnsureResult.CREATED if ok else EnsureResult.FAILED
+
+    # ── Standard panel provisioning ───────────────────────────────────────────
+
     def get_inbound_clients(self, inbound_id: int):
         """
         Read the client list for an inbound from the panel.
