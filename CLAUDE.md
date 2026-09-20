@@ -464,6 +464,31 @@ done
 
 ## 📝 CHANGELOG
 
+### 20.09.2026 — H5-MINI Renewal Attribution
+
+**database.py:**
+- Added `renew_source TEXT DEFAULT NULL` column to payments table; ALTER TABLE migration for existing DBs.
+- `create_payment()` accepts optional `renew_source` kwarg; stored at creation, not updated later.
+
+**keyboards.py:**
+- `plans_kb()` accepts `renew_source=None`; encodes source in callback_data as `plan_{key}:{renew_source}` when provided. Without source, callbacks unchanged.
+
+**bot.py:**
+- `_renew_click()`: passes attribution source to `plans_kb(renew_source=source)`.
+- `cb_plan_selected()`: parses `plan_{key}:{renew_source}` format; threads renew_source through to `create_payment`.
+- `_create_subscription_on_server()`: accepts and stores `renew_source`.
+- `handle_payment_success()`: reads `renew_source` from payment record (safe `.get()`); logs `event=payment_renew_success source=...`; failure never blocks fulfillment.
+
+**tests/test_h5_attribution.py (NEW):**
+- 19 tests A–L: source stored at creation (A–F), source belongs to payment not user (G–H), webhook preserves source (I), idempotent duplicate (J), attribution failure safe (K), H3/H4 regression (L). All GREEN.
+
+**scripts/renewal_report.py (NEW):**
+- Read-only report: historical baseline ([-14d, +7d] window, pre-H3), post-H3 attribution by renew_source, pending first-cohort.
+
+**Historical baseline:** 20 eligible renewal cycles pre-H3, 5/20 = 25% renewed. Post-H3: 1 payment (unattributed, direct purchase). First attributed cohort starts from next renewal click.
+
+**Deploy:** commit 498298b, vpnbot restarted 16:45Z. 267/267 tests. Column 11 = renew_source confirmed in production DB.
+
 ### 20.09.2026 — H3 Renewals/Retention
 
 **Scope:** reminders, cabinet CTA, dedup reset. INFRA FREEZE respected — zero infra changes.
