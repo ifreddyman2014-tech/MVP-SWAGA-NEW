@@ -464,6 +464,42 @@ done
 
 ## 📝 CHANGELOG
 
+### 20.09.2026 — H2 Confirmed-Profile Delivery
+
+**Invariant:** NEVER advertise a VPN profile unless access is confirmed on the panel.
+
+**provisioning.py (NEW):**
+- Central resolver: `resolve_available_profiles(candidate_servers, uuid, email, sub_id, expiry_ms) → ProvisioningResult`.
+- `ProvisioningResult(available_servers, failed_servers)` — only confirmed servers reach the caller.
+- Protected server guard (us2, us2-ws) before any I/O; per-server exception isolation.
+- `server_sync_client()` — consolidated idempotent sync (WS→ws_manager, non-standard→ensure_client_uk1, standard→ensure_client with email alias).
+- `panel_email / PANEL_EMAIL_SUFFIXES` — email alias scheme (us1-xhttp → _i3).
+
+**xui_api.py:**
+- No-shrink invariant in `ensure_client` and `ensure_client_uk1`: if panel already holds a later expiry, return `ALREADY_OK` (never shorten the subscription).
+
+**sub_app.py (/sub and /connect):**
+- Call `resolve_available_profiles` at request time; build VLESS links only from `available_servers`.
+- Uses `asyncio.get_running_loop()` (not deprecated `get_event_loop()`).
+- VLESS config built directly from confirmed server objects (not secondary `get_server_config()` lookup).
+
+**bot.py:**
+- Module-level `from provisioning import resolve_available_profiles` (patchable in tests).
+- Module-level `from servers import server_manager` (patchable in tests).
+- `handle_payment_success` renewal path: replaces primary sync + `_sync_client_to_other_servers` with single `resolve_available_profiles` call.
+- `handle_payment_success` new-sub path: same. Zero confirmed → problem message sent (`⚠️`, NOT `✅`), payment NOT marked fulfilled (startup sync will retry).
+- `_create_subscription_on_server` trial path: replaces `_server_add_client` + `_sync_client_to_other_servers` with `resolve_available_profiles`.
+
+**tests/test_h2_confirmed_profiles.py (NEW, 29 tests):**
+- A–E: resolver contract and protected server exclusion.
+- F–J: server_sync_client routing (alias, uk1-fork, WS, exception isolation).
+- K–L: /sub and /connect output contains only confirmed servers.
+- M–N: payment partial (mark fulfilled) vs zero (NOT fulfilled, problem message, no "✅").
+- O–P: trial and renewal resolver integration.
+- Q–R: no-shrink invariant and idempotency.
+
+**Deploy:** commit db62ae3, vpnbot restarted 09:51Z. 202/202 tests. Production smoke: /sub → 7 confirmed servers, all ALREADY_OK (idempotent).
+
 ### 19.09.2026 — H1-F1 Read-First XUI Provisioning (Standard Panels)
 
 **Root causes fixed:**
