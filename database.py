@@ -784,7 +784,7 @@ async def begin_fulfillment(
             # Update subscription
             if is_renewal and existing_sub and existing_sub.get("vless_uuid"):
                 await db.execute(
-                    "UPDATE subscriptions SET end_date = ?, plan = ? "
+                    "UPDATE subscriptions SET end_date = ?, plan = ?, reminder_sent = '' "
                     "WHERE user_id = ? AND is_active = 1",
                     (target_end_iso, plan_key, user_id),
                 )

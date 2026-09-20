@@ -92,6 +92,7 @@ from keyboards import (
     quick_connect_kb,
     cabinet_kb,
     servers_kb,
+    renew_cta_kb,
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -1825,6 +1826,49 @@ async def cb_get_access(callback: types.CallbackQuery) -> None:
     await callback.answer()
 
 
+async def _renew_click(callback: types.CallbackQuery, source: str) -> None:
+    """Shared handler for all renew_<source> callbacks — log click, show tariffs."""
+    user_id = callback.from_user.id
+    logger.info("event=renew_click source=%s user=%s", source, user_id)
+    user = await get_user(user_id)
+    trial_used = bool(user and user["trial_used"])
+    _, discount = await get_user_discount(user_id)
+    if discount > 0:
+        text = f"📋 <b>Выберите тарифный план:</b>\n\n🎟 Активна скидка: <b>-{discount}%</b>"
+    else:
+        text = "📋 <b>Выберите тарифный план:</b>"
+    await callback.message.answer(
+        text,
+        reply_markup=plans_kb(trial_used, discount_percent=discount),
+    )
+    await callback.answer()
+
+
+@dp.callback_query_handler(lambda c: c.data == "renew_72h")
+async def cb_renew_72h(callback: types.CallbackQuery) -> None:
+    await _renew_click(callback, "renew_72h")
+
+
+@dp.callback_query_handler(lambda c: c.data == "renew_24h")
+async def cb_renew_24h(callback: types.CallbackQuery) -> None:
+    await _renew_click(callback, "renew_24h")
+
+
+@dp.callback_query_handler(lambda c: c.data == "renew_3h")
+async def cb_renew_3h(callback: types.CallbackQuery) -> None:
+    await _renew_click(callback, "renew_3h")
+
+
+@dp.callback_query_handler(lambda c: c.data == "renew_expired")
+async def cb_renew_expired(callback: types.CallbackQuery) -> None:
+    await _renew_click(callback, "renew_expired")
+
+
+@dp.callback_query_handler(lambda c: c.data == "renew_cabinet")
+async def cb_renew_cabinet(callback: types.CallbackQuery) -> None:
+    await _renew_click(callback, "renew_cabinet")
+
+
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("plan_"))
 async def cb_plan_selected(callback: types.CallbackQuery) -> None:
     """Обработка выбора тарифного плана — показать выбор сервера."""
@@ -2567,8 +2611,8 @@ async def _create_subscription_on_server(
 async def _scheduler_expiration_check() -> None:
     """
     Ежедневная проверка подписок (00:00 UTC):
-    — За 3 дня до окончания: напоминание.
-    — Истекшие: удаление клиента, деактивация, уведомление.
+    — Истекшие: удаление клиента, деактивация, уведомление с CTA.
+    Напоминания 72h/24h/3h обрабатываются в _scheduler_reminders.
     """
     while True:
         now = datetime.utcnow()
@@ -2579,25 +2623,7 @@ async def _scheduler_expiration_check() -> None:
         wait_seconds = (tomorrow - now).total_seconds()
         await asyncio.sleep(wait_seconds)
 
-        logger.info("Scheduler: проверка подписок")
-
-        # Напоминания (за 3 дня)
-        try:
-            expiring = await list_expiring(days=3)
-            for sub in expiring:
-                try:
-                    end_str = format_date(sub["end_date"])
-                    await bot.send_message(
-                        sub["user_id"],
-                        f"⏳ Ваша подписка истекает <b>{end_str}</b>.\n"
-                        "Продлите её, чтобы не потерять доступ!",
-                        parse_mode=types.ParseMode.HTML,
-                    )
-                except Exception as e:
-                    logger.warning("Не удалось отправить напоминание user=%s: %s", sub["user_id"], e)
-        except Exception as e:
-            logger.error("Ошибка при выборке expiring subs: %s", e)
-            await notify_error("Scheduler: проверка expiring", e)
+        logger.info("Scheduler: проверка истёкших подписок")
 
         # Истекшие подписки
         try:
@@ -2620,9 +2646,10 @@ async def _scheduler_expiration_check() -> None:
                     try:
                         await bot.send_message(
                             uid,
-                            "😔 Ваша подписка истекла.\n"
-                            "Нажмите «Получить доступ», чтобы выбрать новый тариф.",
+                            "❌ <b>Подписка SWAGA закончилась.</b>\n\n"
+                            "Чтобы снова пользоваться VPN, продлите подписку.",
                             parse_mode=types.ParseMode.HTML,
+                            reply_markup=renew_cta_kb("expired"),
                         )
                     except Exception as e:
                         logger.warning("Не удалось уведомить user=%s: %s", uid, e)
@@ -2661,13 +2688,12 @@ async def _scheduler_reminders() -> None:
                     await mark_reminder_sent(sub["sub_id"], "3d")
                     continue
                 try:
-                    end_str = format_date(sub["end_date"])
                     await bot.send_message(
                         sub["user_id"],
-                        f"⏳ <b>Напоминание!</b>\n\n"
-                        f"Ваша подписка истекает через <b>3 дня</b> ({end_str}).\n"
-                        f"Продлите её заранее, чтобы не потерять доступ к VPN!",
+                        "⏳ Подписка SWAGA закончится через 3 дня.\n\n"
+                        "Продлите заранее — срок добавится к текущей подписке.",
                         parse_mode=types.ParseMode.HTML,
+                        reply_markup=renew_cta_kb("72h"),
                     )
                     await mark_reminder_sent(sub["sub_id"], "3d")
                     logger.info("Напоминание 3d отправлено user=%s", sub["user_id"])
@@ -2684,10 +2710,9 @@ async def _scheduler_reminders() -> None:
                     end_str = format_date(sub["end_date"])
                     await bot.send_message(
                         sub["user_id"],
-                        f"⚠️ <b>Подписка истекает завтра!</b>\n\n"
-                        f"Дата окончания: <b>{end_str}</b>\n"
-                        f"Успейте продлить, чтобы VPN продолжил работать!",
+                        f"⏳ До окончания SWAGA остался 1 день (<b>{end_str}</b>).",
                         parse_mode=types.ParseMode.HTML,
+                        reply_markup=renew_cta_kb("24h"),
                     )
                     await mark_reminder_sent(sub["sub_id"], "1d")
                     logger.info("Напоминание 1d отправлено user=%s", sub["user_id"])
@@ -2703,10 +2728,9 @@ async def _scheduler_reminders() -> None:
                 try:
                     await bot.send_message(
                         sub["user_id"],
-                        f"🔴 <b>Срочно! Подписка истекает через 3 часа!</b>\n\n"
-                        f"После истечения VPN перестанет работать.\n"
-                        f"Нажмите «Получить доступ», чтобы продлить прямо сейчас!",
+                        "⚠️ Подписка SWAGA закончится примерно через 3 часа.",
                         parse_mode=types.ParseMode.HTML,
+                        reply_markup=renew_cta_kb("3h"),
                     )
                     await mark_reminder_sent(sub["sub_id"], "3h")
                     logger.info("Напоминание 3h отправлено user=%s", sub["user_id"])

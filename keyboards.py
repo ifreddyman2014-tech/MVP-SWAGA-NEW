@@ -132,6 +132,12 @@ def quick_connect_kb(sub_url: str) -> InlineKeyboardMarkup:
     )
     kb.add(
         InlineKeyboardButton(
+            text="💳 Продлить подписку",
+            callback_data="renew_cabinet",
+        )
+    )
+    kb.add(
+        InlineKeyboardButton(
             text="👥 Рефералы",
             callback_data="referrals",
         )
@@ -140,6 +146,23 @@ def quick_connect_kb(sub_url: str) -> InlineKeyboardMarkup:
         InlineKeyboardButton(
             text="Техподдержка",
             url=SUPPORT_URL,
+        )
+    )
+    return kb
+
+
+def renew_cta_kb(source: str = "") -> InlineKeyboardMarkup:
+    """Single-button keyboard with [Продлить подписку].
+
+    source: attribution tag appended to callback_data (e.g. '72h', '24h', '3h',
+            'expired', 'cabinet'). Empty string → generic 'get_access' callback.
+    """
+    kb = InlineKeyboardMarkup(row_width=1)
+    callback = f"renew_{source}" if source else "get_access"
+    kb.add(
+        InlineKeyboardButton(
+            text="💳 Продлить подписку",
+            callback_data=callback,
         )
     )
     return kb
