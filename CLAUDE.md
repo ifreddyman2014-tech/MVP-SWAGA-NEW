@@ -464,6 +464,26 @@ done
 
 ## 📝 CHANGELOG
 
+### 20.09.2026 — XUI Live Network Guard
+
+**Context:** Post-triage of worktree traceback incident. Production was never affected — traceback in `.claude/worktrees/h3-renewals/xui_api.py` was from a test/script execution outside the systemd service, not production. Guard prevents recurrence.
+
+**xui_api.py:**
+- `LiveXUIAccessDenied(RuntimeError)` — new exception raised when live panel access is attempted without opt-in.
+- `_check_live_xui_access()` — checks `SWAGA_ALLOW_LIVE_XUI == "1"` (exact). Called at start of `login()`, which is the single choke point for all network paths.
+- Tests using `_make_xui()` (_logged_in=True) bypass login() → unaffected.
+- `import os` added.
+
+**/etc/systemd/system/vpnbot.service:**
+- `Environment=SWAGA_ALLOW_LIVE_XUI=1` added. Only the production systemd-managed process has this flag. Tests, worktrees, interactive shells, and Claude Code do NOT receive it.
+
+**tests/test_xui_live_guard.py (NEW, 21 tests A-I):**
+- Guard enforced for no-env, =0, invalid value; permitted for =1.
+- Mocked path (_logged_in=True) testable without opt-in.
+- All write + read methods protected. Existing behavior preserved.
+
+**Deploy:** commit b7a69a8, vpnbot restarted 17:16Z. 288/288 tests. Safety proof: `LiveXUIAccessDenied` raised when run from h3-renewals directory without opt-in.
+
 ### 20.09.2026 — H5-MINI Renewal Attribution
 
 **database.py:**
