@@ -5,6 +5,7 @@ Serves base64-encoded VLESS links at /sub/{sub_id}.
 Replaces 3X-UI's broken built-in subscription service that returns 127.0.0.1.
 """
 
+import asyncio
 import base64
 import logging
 from datetime import datetime
@@ -53,6 +54,7 @@ from config import (
 from database import get_sub_by_xui_id
 from utils import build_vless_link, format_date
 from servers import server_manager, PROTECTED_SERVER_IDS
+from provisioning import resolve_available_profiles
 
 logger = logging.getLogger(__name__)
 
@@ -169,33 +171,53 @@ async def handle_subscription(request: web.Request) -> web.Response:
         )
         encoded = base64.b64encode(vless_link.encode()).decode()
     else:
-        # Генерируем VLESS ссылки для всех включенных серверов
+        # H2: Confirm access on each server before advertising.
+        expiry_ms_prov = 0
+        if sub.get("end_date"):
+            try:
+                _ed = sub["end_date"]
+                if isinstance(_ed, str):
+                    _ed = datetime.fromisoformat(_ed)
+                expiry_ms_prov = int(_ed.timestamp() * 1000)
+            except (ValueError, TypeError):
+                pass
+
+        loop = asyncio.get_running_loop()
+        prov_result = await loop.run_in_executor(
+            None, resolve_available_profiles,
+            enabled_servers,
+            sub["vless_uuid"],
+            sub.get("xui_email") or "",
+            sub.get("xui_sub_id") or "",
+            expiry_ms_prov,
+        )
+        confirmed_servers = prov_result.available_servers
+        if not confirmed_servers:
+            logger.warning("/sub %s: zero confirmed servers", sub_id)
+
         vless_links = []
         end_date_str = format_date(sub["end_date"]) if sub.get("end_date") else ""
 
-        for server in enabled_servers:
-            cfg = get_server_config(server.id)
-            flag = cfg["flag"]
-
-            # Формируем уникальное название для каждого сервера
-            server_name = server.name if hasattr(server, 'name') else server.location
+        for server in confirmed_servers:
+            flag = LOCATION_FLAGS.get(getattr(server, "location", ""), "🌐")
+            server_name = getattr(server, "name", None) or getattr(server, "location", "")
             remark = f"{flag} SWAGA {server_name} - до {end_date_str}" if end_date_str else f"{flag} SWAGA {server_name}"
 
             vless_link = build_vless_link(
                 uuid_str=sub["vless_uuid"],
-                host=cfg["host"],
-                port=cfg["port"],
-                transport=cfg["transport"],
-                path=cfg["path"],
-                camouflage_host=cfg["camouflage_host"],
-                xhttp_mode=cfg["xhttp_mode"],
-                reality_pbk=cfg["reality_pbk"],
-                reality_sid=cfg["reality_sid"],
-                reality_fp=cfg["reality_fp"],
-                reality_sni=cfg["reality_sni"],
+                host=getattr(server, "host", VPN_HOST),
+                port=getattr(server, "vpn_port", VPN_PORT),
+                transport=getattr(server, "transport", VPN_TRANSPORT) or VPN_TRANSPORT,
+                path=getattr(server, "transport_path", VPN_PATH) or VPN_PATH,
+                camouflage_host=getattr(server, "transport_host", VPN_CAMOUFLAGE_HOST) or VPN_CAMOUFLAGE_HOST,
+                xhttp_mode=getattr(server, "xhttp_mode", VPN_XHTTP_MODE) or VPN_XHTTP_MODE,
+                reality_pbk=getattr(server, "reality_pbk", REALITY_PUBLIC_KEY) or REALITY_PUBLIC_KEY,
+                reality_sid=getattr(server, "reality_sid", REALITY_SHORT_ID) or REALITY_SHORT_ID,
+                reality_fp=getattr(server, "reality_fp", REALITY_FINGERPRINT) or REALITY_FINGERPRINT,
+                reality_sni=getattr(server, "reality_sni", REALITY_SNI) or REALITY_SNI,
                 reality_spx=REALITY_SPIDERX,
                 remark=remark,
-                flow=cfg["flow"],
+                flow=getattr(server, "flow", "") or "",
             )
             vless_links.append(vless_link)
 
@@ -730,27 +752,50 @@ async def handle_connect(request: web.Request) -> web.Response:
         )
         vless_links.append(vless_link)
     else:
-        for server in enabled_servers:
-            cfg = get_server_config(server.id)
-            flag = cfg["flag"]
-            server_name = server.name if hasattr(server, 'name') else server.location
+        # H2: Confirm access on each server before advertising.
+        expiry_ms_prov = 0
+        if sub.get("end_date"):
+            try:
+                _ed2 = sub["end_date"]
+                if isinstance(_ed2, str):
+                    _ed2 = datetime.fromisoformat(_ed2)
+                expiry_ms_prov = int(_ed2.timestamp() * 1000)
+            except (ValueError, TypeError):
+                pass
+
+        loop = asyncio.get_running_loop()
+        prov_result = await loop.run_in_executor(
+            None, resolve_available_profiles,
+            enabled_servers,
+            sub["vless_uuid"],
+            sub.get("xui_email") or "",
+            sub.get("xui_sub_id") or "",
+            expiry_ms_prov,
+        )
+        confirmed_servers = prov_result.available_servers
+        if not confirmed_servers:
+            logger.warning("/connect %s: zero confirmed servers", sub_id)
+
+        for server in confirmed_servers:
+            flag = LOCATION_FLAGS.get(getattr(server, "location", ""), "🌐")
+            server_name = getattr(server, "name", None) or getattr(server, "location", "")
             remark = f"{flag} SWAGA {server_name} - до {end_date_str}" if end_date_str else f"{flag} SWAGA {server_name}"
 
             vless_link = build_vless_link(
                 uuid_str=sub["vless_uuid"],
-                host=cfg["host"],
-                port=cfg["port"],
-                transport=cfg["transport"],
-                path=cfg["path"],
-                camouflage_host=cfg["camouflage_host"],
-                xhttp_mode=cfg["xhttp_mode"],
-                reality_pbk=cfg["reality_pbk"],
-                reality_sid=cfg["reality_sid"],
-                reality_fp=cfg["reality_fp"],
-                reality_sni=cfg["reality_sni"],
+                host=getattr(server, "host", VPN_HOST),
+                port=getattr(server, "vpn_port", VPN_PORT),
+                transport=getattr(server, "transport", VPN_TRANSPORT) or VPN_TRANSPORT,
+                path=getattr(server, "transport_path", VPN_PATH) or VPN_PATH,
+                camouflage_host=getattr(server, "transport_host", VPN_CAMOUFLAGE_HOST) or VPN_CAMOUFLAGE_HOST,
+                xhttp_mode=getattr(server, "xhttp_mode", VPN_XHTTP_MODE) or VPN_XHTTP_MODE,
+                reality_pbk=getattr(server, "reality_pbk", REALITY_PUBLIC_KEY) or REALITY_PUBLIC_KEY,
+                reality_sid=getattr(server, "reality_sid", REALITY_SHORT_ID) or REALITY_SHORT_ID,
+                reality_fp=getattr(server, "reality_fp", REALITY_FINGERPRINT) or REALITY_FINGERPRINT,
+                reality_sni=getattr(server, "reality_sni", REALITY_SNI) or REALITY_SNI,
                 reality_spx=REALITY_SPIDERX,
                 remark=remark,
-                flow=cfg["flow"],
+                flow=getattr(server, "flow", "") or "",
             )
             vless_links.append(vless_link)
 

@@ -69,7 +69,8 @@ from xui_api import XUIAPI
 # from yookassa_payment import create_payment as yookassa_create_payment  # Временно отключено
 from backup import backup_now
 from utils import generate_uuid, generate_sub_id, format_date, build_vless_link
-from servers import PROTECTED_SERVER_IDS
+from servers import PROTECTED_SERVER_IDS, server_manager
+from provisioning import resolve_available_profiles
 
 # Per-inbound panel email alias scheme.
 # Panels that share inbounds require a unique email per inbound for the same logical UUID.
@@ -2265,45 +2266,44 @@ async def _create_subscription_on_server(
         end = base_date + timedelta(days=plan["days"])
         expiry_ms = int(end.timestamp() * 1000)  # 3X-UI использует миллисекунды
 
-        try:
-            if use_default:
-                # Используем дефолтный xui из .env
+        if use_default:
+            # Legacy default server path
+            try:
                 success = xui.add_client(
                     INBOUND_ID, new_uuid, email,
                     sub_id=sub_id, expiry_time=expiry_ms
                 )
-                vpn_host = VPN_HOST
-                vpn_port = VPN_PORT
-                actual_server_id = "default"
-            else:
-                # Используем выбранный сервер
-                success = _server_add_client(
-                    server, new_uuid, email,
-                    sub_id=sub_id, expiry_ms=expiry_ms, flow=server.flow,
+                if not success:
+                    raise RuntimeError("xui.add_client returned False")
+            except Exception as e:
+                logger.error("Ошибка создания VPN-клиента: %s", e)
+                await notify_error("Создание VPN-клиента", e)
+                await callback.message.answer(
+                    "❌ Не удалось создать VPN-конфиг. Обратитесь в поддержку."
                 )
-                vpn_host = server.host
-                vpn_port = server.vpn_port
-                actual_server_id = server.id
-                server.current_users += 1
-                # Регистрируем UUID на всех остальных включённых серверах
-                other_servers = [s for s in server_manager.get_all_servers() if s.enabled]
-                if len(other_servers) > 1:
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
-                        None, _sync_client_to_other_servers,
-                        new_uuid, email, sub_id, expiry_ms, actual_server_id, other_servers,
-                        False,  # is_renewal
-                    )
+                return
+            vpn_host = VPN_HOST
+            vpn_port = VPN_PORT
+            actual_server_id = "default"
+        else:
+            vpn_host = server.host
+            vpn_port = server.vpn_port
+            actual_server_id = server.id
+            server.current_users += 1
 
-            if not success:
-                raise RuntimeError("3X-UI add_client вернул False")
-        except Exception as e:
-            logger.error("Ошибка создания VPN-клиента: %s", e)
-            await notify_error("Создание VPN-клиента", e)
-            await callback.message.answer(
-                "❌ Не удалось создать VPN-конфиг. Обратитесь в поддержку."
+            # H2: Sync all enabled servers; confirmed = advertised.
+            _all_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+            loop = asyncio.get_running_loop()
+            prov_result = await loop.run_in_executor(
+                None, resolve_available_profiles,
+                _all_servers, new_uuid, email, sub_id, expiry_ms,
             )
-            return
+            if not prov_result.available_servers:
+                logger.warning("Trial/free: zero confirmed servers for user %s", user_id)
+                await callback.message.answer(
+                    "❌ Не удалось создать VPN-конфиг. Обратитесь в поддержку."
+                )
+                return
 
         # Сохранение новой подписки в БД
         await deactivate_user_subs(user_id)
@@ -2987,59 +2987,30 @@ async def handle_payment_success(
         email = sub_info["email"]
         end = datetime.fromisoformat(sub_info["end_date"])
         new_expiry_ms = sub_info["expiry_ms"]
-        primary_sync_ok = False
         if actual_server_id and actual_server_id != "default":
             server = server_manager.get_server(actual_server_id)
             vpn_host = server.host if server else VPN_HOST
             vpn_port = server.vpn_port if server else VPN_PORT
-            if server:
-                if actual_server_id not in PROTECTED_SERVER_IDS:
-                    # WS servers don't store expiry in the panel — DB is the source of truth,
-                    # so no panel call is needed; treat as sync success.
-                    # XUI servers: use _server_sync_client (idempotent, returns bool).
-                    try:
-                        primary_sync_ok = _server_sync_client(
-                            server, new_uuid, email,
-                            sub_id=sub_id, expiry_ms=new_expiry_ms, flow=server.flow,
-                        )
-                    except Exception as e:
-                        logger.warning("Не удалось обновить expiry в панели: %s", e)
-                        primary_sync_ok = False
-                else:
-                    logger.warning(
-                        "Renewal sync skipped: primary server %s is protected; "
-                        "payment %s will remain pending for operator review",
-                        actual_server_id, payment_id,
-                    )
-                # Обновляем expiry на всех остальных включённых серверах (best-effort)
-                other_servers = [s for s in server_manager.get_all_servers() if s.enabled]
-                if len(other_servers) > 1:
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
-                        None, _sync_client_to_other_servers,
-                        new_uuid, email, sub_id, new_expiry_ms, actual_server_id, other_servers,
-                        True,  # is_renewal
-                    )
-            # If server is None (config removed): primary_sync_ok stays False so startup sync retries
         else:
             server = None
             vpn_host = VPN_HOST
             vpn_port = VPN_PORT
-            # Обновляем на дефолтном сервере
-            try:
-                xui.update_client(INBOUND_ID, new_uuid, email, sub_id=sub_id, expiry_time=new_expiry_ms)
-                primary_sync_ok = True
-            except Exception as e:
-                logger.warning("Не удалось обновить expiry в панели: %s", e)
 
-        if primary_sync_ok:
+        # H2: Sync all enabled servers; confirmed = advertised.
+        _all_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+        loop = asyncio.get_running_loop()
+        prov_result = await loop.run_in_executor(
+            None, resolve_available_profiles,
+            _all_servers, new_uuid, email, sub_id, new_expiry_ms,
+        )
+        if prov_result.available_servers:
             if payment_id:
                 await mark_payment_fulfilled(payment_id)
         else:
-            if payment_id:
-                logger.warning(
-                    "Renewal sync failed for payment %s; startup sync will retry", payment_id
-                )
+            logger.warning(
+                "Renewal: zero confirmed servers for payment %s user %s — pending for startup sync",
+                payment_id, user_id,
+            )
         is_extension = True
         logger.info("Extending subscription for user %s to %s", user_id, end)
 
@@ -3102,8 +3073,9 @@ async def handle_payment_success(
         end = datetime.fromisoformat(sub_info["end_date"])
         expiry_ms = sub_info["expiry_ms"]
 
-        try:
-            if use_default or actual_server_id == "default":
+        if use_default or actual_server_id == "default":
+            # Legacy default server path
+            try:
                 success = xui.add_or_update_client(
                     INBOUND_ID, new_uuid, email,
                     sub_id=sub_id, expiry_time=expiry_ms
@@ -3111,52 +3083,58 @@ async def handle_payment_success(
                     INBOUND_ID, new_uuid, email,
                     sub_id=sub_id, expiry_time=expiry_ms
                 )
-                vpn_host = VPN_HOST
-                vpn_port = VPN_PORT
-            else:
-                success = _server_add_client(
-                    server, new_uuid, email,
-                    sub_id=sub_id, expiry_ms=expiry_ms, flow=server.flow,
-                )
-                vpn_host = server.host
-                vpn_port = server.vpn_port
-                if result_code == "first":
-                    server.current_users += 1
-                # Sync to all other enabled servers
-                other_servers = [s for s in server_manager.get_all_servers() if s.enabled]
-                if len(other_servers) > 1:
-                    loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
-                        None, _sync_client_to_other_servers,
-                        new_uuid, email, sub_id, expiry_ms, actual_server_id, other_servers,
-                        False,  # is_renewal
+                if not success:
+                    raise RuntimeError("xui.add_client returned False")
+            except Exception as e:
+                logger.error("Ошибка создания VPN-клиента после оплаты: %s", e)
+                await notify_error("Создание VPN-клиента (оплата)", e)
+                try:
+                    await bot.send_message(
+                        user_id,
+                        "❌ Оплата прошла, но не удалось создать VPN-конфиг.\n"
+                        "Обратитесь в поддержку — мы всё исправим!",
                     )
-
-            if not success:
-                raise RuntimeError("3X-UI add_client вернул False")
-
-        except Exception as e:
-            logger.error("Ошибка создания VPN-клиента после оплаты: %s", e)
-            await notify_error("Создание VPN-клиента (оплата)", e)
-            try:
-                await bot.send_message(
-                    user_id,
-                    "❌ Оплата прошла, но не удалось создать VPN-конфиг.\n"
-                    "Обратитесь в поддержку — мы всё исправим!",
-                )
-            except Exception:
-                pass
-            # Subscription IS already in DB (begin_fulfillment committed). Startup sync
-            # will retry the panel call on next restart. Do NOT return without mark_fulfilled —
-            # this leaves fulfillment_status='pending' so startup sync picks it up.
+                except Exception:
+                    pass
+                return
+            vpn_host = VPN_HOST
+            vpn_port = VPN_PORT
             if payment_id:
-                logger.warning(
-                    "Panel sync failed for payment %s; startup sync will retry", payment_id
-                )
-            return
+                await mark_payment_fulfilled(payment_id)
+        else:
+            vpn_host = server.host
+            vpn_port = server.vpn_port
+            if result_code == "first":
+                server.current_users += 1
 
-        if payment_id:
-            await mark_payment_fulfilled(payment_id)
+            # H2: Sync all enabled servers; confirmed = advertised.
+            _all_servers = [s for s in server_manager.get_all_servers() if s.enabled]
+            loop = asyncio.get_running_loop()
+            prov_result = await loop.run_in_executor(
+                None, resolve_available_profiles,
+                _all_servers, new_uuid, email, sub_id, expiry_ms,
+            )
+
+            if not prov_result.available_servers:
+                logger.warning(
+                    "New-sub payment %s: zero confirmed servers for user %s",
+                    payment_id, user_id,
+                )
+                if user_id > 0:
+                    try:
+                        await bot.send_message(
+                            user_id,
+                            "⚠️ <b>Оплата прошла, но не удалось создать VPN-конфиг.</b>\n\n"
+                            "Обратитесь в поддержку — мы всё исправим!\n\n"
+                            f"💬 Поддержка: {SUPPORT_URL}",
+                            parse_mode=types.ParseMode.HTML,
+                        )
+                    except Exception:
+                        pass
+                return  # Don't fulfill — startup sync will retry
+
+            if payment_id:
+                await mark_payment_fulfilled(payment_id)
 
     # Реферальный бонус
     referral_bonus_text = ""

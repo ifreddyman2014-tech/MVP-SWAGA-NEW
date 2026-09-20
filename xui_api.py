@@ -399,6 +399,10 @@ class XUIAPI:
         for c in clients:
             if c.get("id") == uuid:
                 use_email = c.get("email") or email
+                # No-shrink: if panel already holds a later (or equal) expiry, leave it.
+                panel_expiry = c.get("expiryTime") or 0
+                if expiry_time > 0 and panel_expiry > 0 and panel_expiry >= expiry_time:
+                    return EnsureResult.ALREADY_OK
                 ok = self._uk1_update_client(uuid, use_email, sub_id, expiry_time, flow)
                 return EnsureResult.UPDATED if ok else EnsureResult.FAILED
 
@@ -502,6 +506,10 @@ class XUIAPI:
             if c.get("id") == uuid:
                 # Preserve existing panel email — never silently rename a client.
                 use_email = c.get("email") or email
+                # No-shrink: if panel already holds a later (or equal) expiry, leave it.
+                panel_expiry = c.get("expiryTime") or 0
+                if expiry_time > 0 and panel_expiry > 0 and panel_expiry >= expiry_time:
+                    return EnsureResult.ALREADY_OK
                 ok = self.update_client(
                     inbound_id, uuid, use_email,
                     sub_id=sub_id, expiry_time=expiry_time, flow=flow,
