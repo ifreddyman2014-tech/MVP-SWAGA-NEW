@@ -5,6 +5,7 @@
 
 import json
 import logging
+import os
 from enum import Enum
 
 import urllib3
@@ -21,6 +22,27 @@ logger = logging.getLogger(__name__)
 # Подстроки в msg ответа, означающие «клиент с таким UUID не найден».
 # Используются в add_or_update_client для fallback на addClient.
 _NOT_FOUND_MARKERS = ("record not found", "not found", "no client")
+
+
+class LiveXUIAccessDenied(RuntimeError):
+    """Raised when live XUI panel access is attempted without explicit opt-in.
+
+    Set SWAGA_ALLOW_LIVE_XUI=1 in the production systemd service environment
+    to permit real network calls. Tests and worktrees must NOT set this flag.
+    """
+
+
+def _check_live_xui_access() -> None:
+    """Fail-closed guard: deny live XUI network access unless explicitly enabled.
+
+    Only SWAGA_ALLOW_LIVE_XUI=1 (exact string) grants access.
+    Absent, '0', 'true', 'yes', or any other value → denied.
+    """
+    if os.environ.get("SWAGA_ALLOW_LIVE_XUI") != "1":
+        raise LiveXUIAccessDenied(
+            "Live XUI network access is disabled in this environment. "
+            "Set SWAGA_ALLOW_LIVE_XUI=1 only in the production systemd service."
+        )
 
 
 class EnsureResult(Enum):
@@ -71,6 +93,7 @@ class XUIAPI:
 
     def login(self, username: str = None, password: str = None) -> bool:
         """Авторизация в панели. Возвращает True при успехе."""
+        _check_live_xui_access()
         import re as _re
         url = self._url("login")
         user = username or XUI_USER
