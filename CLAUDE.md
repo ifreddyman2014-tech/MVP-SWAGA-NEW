@@ -464,6 +464,51 @@ done
 
 ## 📝 CHANGELOG
 
+### 20.09.2026 — H3 Renewals/Retention
+
+**Scope:** reminders, cabinet CTA, dedup reset. INFRA FREEZE respected — zero infra changes.
+
+**keyboards.py:**
+- Added `renew_cta_kb(source="")` — single-button [Продлить подписку] keyboard.
+  `source` → `callback_data=renew_{source}` (or `get_access` if empty).
+- `quick_connect_kb`: added [Продлить подписку] button with `callback_data=renew_cabinet`.
+
+**bot.py:**
+- `from keyboards import renew_cta_kb` added to imports.
+- `_scheduler_expiration_check`: removed duplicate 3-day reminder block (`list_expiring` call).
+  Expired notification now includes `reply_markup=renew_cta_kb("expired")`.
+- `_scheduler_reminders`: all 3 stages (3d/1d/3h) now include `reply_markup=renew_cta_kb(…)`.
+  Copy updated to Russian retention-focused messages.
+- Added `_renew_click(callback, source)` — shared handler: logs `event=renew_click source=… user=…`,
+  shows tariff-selection screen via `plans_kb` (respects trial_used + promo discount).
+- Added 5 source-tagged handlers: `cb_renew_72h`, `cb_renew_24h`, `cb_renew_3h`,
+  `cb_renew_expired`, `cb_renew_cabinet` — each calls `_renew_click`.
+
+**database.py:**
+- `begin_fulfillment` renewal UPDATE: added `reminder_sent = ''` reset.
+  After a paid renewal changes end_date, the new expiry window starts a fresh reminder cycle.
+
+**tests/test_h3_renewals.py (NEW, 23 tests):**
+- A–D: each reminder stage sends inline renewal CTA.
+- E–E3: renew_cta_kb structure + source handlers existence.
+- F–G: cabinet CTA for active and expired users.
+- H–I: expiration check no longer calls list_expiring; get_subs_for_reminder/mark_reminder_sent API.
+- J–K: renewal semantics (is_renewal param, ✅ + format_date in confirmation).
+- L: reminder copy doesn't contain "платн".
+- M–M3: provisioning/xui_api/servers untouched.
+- N1–N3: expiry-aware dedup — begin_fulfillment resets reminder_sent; NOT LIKE guard; routing.
+- N4–N5b: migration safety — legacy flags preserved; scheduler never clears reminder_sent.
+
+**Deploy:** commit 40d7526. vpnbot restarted 1 time at 16:01Z. 219/225 tests pass
+(6 pre-existing failures: test_h2 M/O + test_xui_ensure_client 32/33/34/51 — unrelated to H3).
+
+**Retention baseline (pre-H3):**
+- Unique paid active: 31 (1y=14, 3m=9, 1m=8)
+- 90-day renewal opportunities: 41
+- 30-day renewal rate: 1/3 (33%) — 3 paid expired, 1 renewed
+- Expiring ≤3d: 3 subs (2 paid: sub 350/expired, sub 359/2026-09-21; 1 trial)
+- Lapsed paid (no active sub, expired last 30d): 2
+
 ### 20.09.2026 — H2 Confirmed-Profile Delivery
 
 **Invariant:** NEVER advertise a VPN profile unless access is confirmed on the panel.
