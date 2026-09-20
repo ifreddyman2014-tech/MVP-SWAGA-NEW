@@ -1873,7 +1873,7 @@ async def _renew_click(callback: types.CallbackQuery, source: str) -> None:
         text = "📋 <b>Выберите тарифный план:</b>"
     await callback.message.answer(
         text,
-        reply_markup=plans_kb(trial_used, discount_percent=discount),
+        reply_markup=plans_kb(trial_used, discount_percent=discount, renew_source=source),
     )
     await callback.answer()
 
@@ -1907,7 +1907,11 @@ async def cb_renew_cabinet(callback: types.CallbackQuery) -> None:
 async def cb_plan_selected(callback: types.CallbackQuery) -> None:
     """Обработка выбора тарифного плана — показать выбор сервера."""
     user_id = callback.from_user.id
-    plan_key = callback.data.replace("plan_", "")  # trial, 1m, 3m, 1y
+    # callback_data format: "plan_{key}" or "plan_{key}:{renew_source}"
+    raw = callback.data[len("plan_"):]
+    parts = raw.split(":", 1)
+    plan_key = parts[0]                               # "trial", "1m", "3m", "1y"
+    renew_source = parts[1] if len(parts) > 1 else None  # e.g. "renew_72h" or None
 
     if plan_key not in PLANS:
         await callback.answer("❌ Неизвестный тарифный план.", show_alert=True)
@@ -1938,18 +1942,18 @@ async def cb_plan_selected(callback: types.CallbackQuery) -> None:
     if not servers:
         # Если нет серверов — используем текущий сервер (fallback)
         await callback.answer()
-        await _create_subscription_on_server(callback, plan_key, None)
+        await _create_subscription_on_server(callback, plan_key, None, renew_source=renew_source)
         return
 
     if len(servers) == 1:
         # Если только один сервер — сразу создаём подписку
         await callback.answer()
-        await _create_subscription_on_server(callback, plan_key, servers[0].id)
+        await _create_subscription_on_server(callback, plan_key, servers[0].id, renew_source=renew_source)
         return
 
     # Сразу создаем подписку без выбора сервера (автоматический выбор лучшего)
     await callback.answer()
-    await _create_subscription_on_server(callback, plan_key, None)
+    await _create_subscription_on_server(callback, plan_key, None, renew_source=renew_source)
 
 
 @dp.callback_query_handler(lambda c: c.data and c.data.startswith("server_"))
@@ -2150,6 +2154,7 @@ async def _create_subscription_on_server(
     callback: types.CallbackQuery,
     plan_key: str,
     server_id: str | None,
+    renew_source: str | None = None,
 ) -> None:
     """Создать подписку на выбранном сервере."""
     user_id = callback.from_user.id
@@ -2203,6 +2208,7 @@ async def _create_subscription_on_server(
             amount=final_price,
             plan_key=plan_key,
             server_id=server_id or "",
+            renew_source=renew_source,
         )
 
         # Используем промокод (списываем) и очищаем скидку
@@ -3333,6 +3339,18 @@ async def handle_payment_success(
         )
     except Exception as e:
         logger.error("Ошибка уведомления админов: %s", e)
+
+    # Атрибуция источника обновления (H5)
+    try:
+        pmt = await db_get_payment(payment_id) if payment_id else None
+        renew_source = pmt.get("renew_source") if pmt else None
+        if renew_source:
+            logger.info(
+                "event=payment_renew_success source=%s user=%s plan=%s amount=%s",
+                renew_source, user_id, plan_key, amount,
+            )
+    except Exception:
+        pass  # attribution log failure must never block fulfillment
 
 
 async def _startup_sync_pending_fulfillments() -> None:

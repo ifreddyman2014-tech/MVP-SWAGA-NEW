@@ -96,6 +96,7 @@ async def init_db() -> None:
                 paid_at            TEXT    DEFAULT NULL,
                 target_end_date    TEXT    DEFAULT NULL,
                 fulfillment_status TEXT    DEFAULT NULL,
+                renew_source       TEXT    DEFAULT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(user_id)
             )
         """)
@@ -110,6 +111,13 @@ async def init_db() -> None:
         try:
             await db.execute(
                 "ALTER TABLE payments ADD COLUMN fulfillment_status TEXT DEFAULT NULL"
+            )
+        except sqlite3.OperationalError:
+            pass  # колонка уже существует
+        # Миграция: добавить renew_source для атрибуции H3 CTA
+        try:
+            await db.execute(
+                "ALTER TABLE payments ADD COLUMN renew_source TEXT DEFAULT NULL"
             )
         except sqlite3.OperationalError:
             pass  # колонка уже существует
@@ -591,14 +599,17 @@ async def create_payment(
     amount: float,
     plan_key: str,
     server_id: str = "",
+    renew_source: str | None = None,
 ) -> bool:
     """Создать запись о платеже."""
     async with aiosqlite.connect(DB_PATH) as db:
         try:
             await db.execute(
-                """INSERT INTO payments (payment_id, user_id, amount, plan_key, server_id, status, created_at)
-                   VALUES (?, ?, ?, ?, ?, 'pending', ?)""",
-                (payment_id, user_id, amount, plan_key, server_id, datetime.utcnow().isoformat()),
+                """INSERT INTO payments
+                   (payment_id, user_id, amount, plan_key, server_id, status, created_at, renew_source)
+                   VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                (payment_id, user_id, amount, plan_key, server_id,
+                 datetime.utcnow().isoformat(), renew_source),
             )
             await db.commit()
             return True

@@ -27,19 +27,29 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
 
 # ── Inline-клавиатуры ─────────────────────────────────────────────────────────
 
-def plans_kb(trial_used: bool, discount_percent: int = 0) -> InlineKeyboardMarkup:
+def plans_kb(
+    trial_used: bool,
+    discount_percent: int = 0,
+    renew_source: str | None = None,
+) -> InlineKeyboardMarkup:
     """
     Выбор тарифного плана.
     Скрывает пробный период, если он уже использован.
     discount_percent: скидка в процентах (0-99)
+    renew_source: если задан, кодируется в callback_data как plan_{key}:{renew_source}
+                  чтобы платёж получил атрибуцию источника обновления.
     """
     kb = InlineKeyboardMarkup(row_width=1)
+
+    def _cb(key: str) -> str:
+        return f"plan_{key}:{renew_source}" if renew_source else f"plan_{key}"
+
     if not trial_used:
         trial = PLANS["trial"]
         kb.add(
             InlineKeyboardButton(
                 text=f"🎁 {trial['name']} — {trial['days']} дн. (бесплатно)",
-                callback_data="plan_trial",
+                callback_data=_cb("trial"),
             )
         )
     for key in ("1m", "3m", "1y"):
@@ -47,15 +57,13 @@ def plans_kb(trial_used: bool, discount_percent: int = 0) -> InlineKeyboardMarku
         if discount_percent > 0:
             original = plan["price"]
             discounted = int(original * (100 - discount_percent) / 100)
-            text = f"{plan['name']} — <s>{original}</s> {discounted} ₽ 🔥"
-            # Для callback нужен обычный текст
             btn_text = f"{plan['name']} — {original}→{discounted} ₽ 🔥"
         else:
             btn_text = f"{plan['name']} — {plan['price']} ₽"
         kb.add(
             InlineKeyboardButton(
                 text=btn_text,
-                callback_data=f"plan_{key}",
+                callback_data=_cb(key),
             )
         )
     # Кнопка ввода промокода (скрываем если уже есть скидка)
