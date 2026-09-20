@@ -151,6 +151,17 @@ def quick_connect_kb(sub_url: str) -> InlineKeyboardMarkup:
     return kb
 
 
+def payment_success_kb(sub_url: str) -> InlineKeyboardMarkup:
+    """Keyboard after successful payment: connect CTA + config + support."""
+    kb = InlineKeyboardMarkup(row_width=1)
+    kb.add(InlineKeyboardButton(text="⚡ Подключить VPN", url=sub_url))
+    kb.add(InlineKeyboardButton(text="🔑 Показать конфигурацию", callback_data="show_config"))
+    kb.add(InlineKeyboardButton(text="📱 Инструкция", callback_data="show_instruction"))
+    kb.add(InlineKeyboardButton(text="👤 Личный кабинет", callback_data="update_access"))
+    kb.add(InlineKeyboardButton(text="🆘 Поддержка", url=SUPPORT_URL))
+    return kb
+
+
 def renew_cta_kb(source: str = "") -> InlineKeyboardMarkup:
     """Single-button keyboard with [Продлить подписку].
 

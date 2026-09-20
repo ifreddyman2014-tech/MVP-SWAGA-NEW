@@ -93,6 +93,7 @@ from keyboards import (
     cabinet_kb,
     servers_kb,
     renew_cta_kb,
+    payment_success_kb,
 )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -1237,6 +1238,39 @@ async def cmd_give_access(message: types.Message) -> None:
             )
             logger.error(f"Ошибка создания подписки для {target_user_id}: {e}")
             logger.error(traceback.format_exc())
+
+
+@dp.callback_query_handler(lambda c: c.data == "show_config")
+async def cb_show_config(callback: types.CallbackQuery) -> None:
+    """Show raw VLESS config on demand."""
+    user_id = callback.from_user.id
+    await callback.answer()
+    sub = await get_active_sub(user_id)
+    if not sub or not sub.get("vless_uuid"):
+        await callback.message.answer("Активная подписка не найдена.")
+        return
+    connect_base = SUB_BASE_URL.replace("/sub/", "/connect/")
+    sub_url = f"{connect_base}{sub['xui_sub_id']}"
+    vless_link = build_vless_link(
+        uuid_str=sub["vless_uuid"],
+        host=VPN_HOST,
+        port=VPN_PORT,
+        transport=VPN_TRANSPORT,
+        path=VPN_PATH,
+        camouflage_host=VPN_CAMOUFLAGE_HOST,
+        xhttp_mode=VPN_XHTTP_MODE,
+        reality_pbk=REALITY_PUBLIC_KEY,
+        reality_sid=REALITY_SHORT_ID,
+        reality_fp=REALITY_FINGERPRINT,
+        reality_sni=REALITY_SNI,
+        reality_spx=REALITY_SPIDERX,
+        remark="SWAGA VPN",
+    )
+    await callback.message.answer(
+        f"🔑 <b>Ваш конфиг:</b>\n<code>{vless_link}</code>",
+        parse_mode=types.ParseMode.HTML,
+        reply_markup=quick_connect_kb(sub_url),
+    )
 
 
 @dp.callback_query_handler(lambda c: c.data == "update_access")
@@ -3268,14 +3302,12 @@ async def handle_payment_success(
                 f"📅 Действует до: <b>{format_date(end)}</b>"
                 f"{server_info}"
                 f"{referral_bonus_text}\n\n"
-                f"🔑 <b>Ваш конфиг:</b>\n"
-                f"<code>{vless_link}</code>\n\n"
-                "📲 Нажмите кнопку для подключения."
+                "VPN готов к подключению."
             )
             await bot.send_message(
                 user_id,
                 text,
-                reply_markup=quick_connect_kb(sub_url),
+                reply_markup=payment_success_kb(sub_url),
                 parse_mode=types.ParseMode.HTML,
             )
         except Exception as e:

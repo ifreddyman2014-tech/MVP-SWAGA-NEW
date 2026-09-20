@@ -701,6 +701,55 @@ function fallback(text, btn, hint, successHint) {{
 </html>"""
 
 
+_EXPIRED_HTML = """\
+<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Подписка истекла — SWAGA VPN</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#e6edf3;
+     display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px;box-sizing:border-box;}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px 24px;max-width:400px;
+      width:100%;text-align:center;}
+h1{font-size:20px;margin:0 0 8px;}
+p{color:#8b949e;font-size:15px;margin:0 0 24px;}
+a.btn{display:block;background:#238636;color:#fff;text-decoration:none;border-radius:8px;
+      padding:14px 24px;font-size:16px;font-weight:600;margin-bottom:12px;}
+a.btn:hover{background:#2ea043;}
+a.sec{color:#58a6ff;font-size:14px;text-decoration:none;}
+</style></head>
+<body><div class="card">
+<h1>⏰ Подписка закончилась</h1>
+<p>Ваш VPN доступ истёк. Продлите подписку, чтобы снова пользоваться сервисом.</p>
+<a class="btn" href="https://t.me/Swaga_vpnbot">💳 Продлить подписку</a>
+<a class="sec" href="https://t.me/swagasupport_bot">Поддержка</a>
+</div></body></html>"""
+
+_NOSUB_HTML = """\
+<!DOCTYPE html>
+<html lang="ru">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Подписка не найдена — SWAGA VPN</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#e6edf3;
+     display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px;box-sizing:border-box;}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:32px 24px;max-width:400px;
+      width:100%;text-align:center;}
+h1{font-size:20px;margin:0 0 8px;}
+p{color:#8b949e;font-size:15px;margin:0 0 24px;}
+a.btn{display:block;background:#238636;color:#fff;text-decoration:none;border-radius:8px;
+      padding:14px 24px;font-size:16px;font-weight:600;margin-bottom:12px;}
+a.btn:hover{background:#2ea043;}
+a.sec{color:#58a6ff;font-size:14px;text-decoration:none;}
+</style></head>
+<body><div class="card">
+<h1>🔒 Нет активной подписки</h1>
+<p>У вас нет активной подписки SWAGA VPN. Получите доступ через бот.</p>
+<a class="btn" href="https://t.me/Swaga_vpnbot">🚀 Получить доступ</a>
+<a class="sec" href="https://t.me/swagasupport_bot">Поддержка</a>
+</div></body></html>"""
+
+
 @routes.get("/connect/{sub_id}")
 async def handle_connect(request: web.Request) -> web.Response:
     """HTML page that auto-opens V2RayTun with subscription URL containing all servers."""
@@ -708,10 +757,10 @@ async def handle_connect(request: web.Request) -> web.Response:
 
     sub = await get_sub_by_xui_id(sub_id)
     if not sub or not sub.get("vless_uuid"):
-        return web.Response(status=404, text="subscription not found")
+        return web.Response(text=_NOSUB_HTML, content_type="text/html")
 
     if not sub.get("is_active"):
-        return web.Response(status=403, text="subscription expired")
+        return web.Response(text=_EXPIRED_HTML, content_type="text/html")
 
     # Загружаем конфигурацию серверов если не загружена
     if not server_manager.servers:
